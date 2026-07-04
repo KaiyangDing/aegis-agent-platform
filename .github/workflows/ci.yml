@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true          # 缓存依赖下载，第二次起 CI 明显变快
+
+      - name: 安装依赖（严格按 uv.lock，锁不同步直接失败）
+        run: uv sync --frozen
+
+      - name: 代码检查（ruff）
+        run: uv run ruff check .
+
+      - name: 类型检查（mypy）
+        run: uv run mypy aegis
+
+      - name: 测试（pytest）
+        run: uv run pytest
