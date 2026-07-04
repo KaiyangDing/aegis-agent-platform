@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # 基础设施连接串，默认值就是下一步 docker-compose 的本地地址
     database_url: str = "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis"
-    redis_url: str = "redis://redis:6379/0"
+    redis_url: str = "redis://localhost:6379/0"
 
 
 @lru_cache
