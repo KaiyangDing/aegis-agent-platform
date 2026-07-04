@@ -11,6 +11,7 @@ name = "aegis-agent-platform"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
 
@@ -24,7 +25,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic-settings", specifier = ">=2.14.2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pydantic-settings", specifier = ">=2.14.2" },
+]
 
 [package.metadata.requires-dev]
 dev = [
