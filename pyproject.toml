@@ -2,4 +2,32 @@
 name = "aegis-agent-platform"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic-settings>=2.14.2",
+]
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.13",
+    "mypy>=2.1.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.20",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# E/F=基础错误  I=import 排序  UP=过时写法升级  B=常见 bug 模式
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+check_untyped_defs = true      # 起步先温和；M2 核心模块再逐步收紧到 strict
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]             # 让 pytest 能 import 项目根下的 aegis 包
+asyncio_mode = "auto"          # async def 的测试函数自动被识别，不用逐个加装饰器
