@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # 密钥一律 SecretStr：repr/日志显示 **********，取真值必须 .get_secret_value()。
     # 默认空值是刻意的——CI 和不碰真实 API 的测试无需配 key，M1 在真正调用前校验非空。
     dashscope_api_key: SecretStr = SecretStr("")
+    dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
     # 基础设施连接串，默认值就是下一步 docker-compose 的本地地址
     database_url: str = "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis"
