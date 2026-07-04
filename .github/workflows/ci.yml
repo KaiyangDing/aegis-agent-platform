@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
 
 jobs:
@@ -25,6 +25,9 @@ jobs:
 
       - name: 类型检查（mypy）
         run: uv run mypy aegis
+
+      - name: 架构分层检查（import-linter）
+        run: uv run lint-imports
 
       - name: 测试（pytest）
         run: uv run pytest
