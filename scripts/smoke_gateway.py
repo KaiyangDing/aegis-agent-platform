@@ -7,7 +7,7 @@ import asyncio
 
 from aegis.core.config import get_settings
 from aegis.gateway.providers.openai_compat import OpenAICompatProvider
-from aegis.gateway.schema import LLMRequest, Message
+from aegis.gateway.schema import LLMRequest, Message, TextDelta
 
 
 async def main() -> None:
@@ -23,7 +23,10 @@ async def main() -> None:
         messages=[Message(role="user", content="用一句话说明你是什么模型。")],
     )
     async for chunk in provider.complete(req, model="qwen-flash"):
-        print(chunk)
+        if isinstance(chunk, TextDelta):
+            print(chunk.text, end="", flush=True)  # 亲眼看 token 逐块到达
+        else:
+            print(f"\n{chunk}")
 
 
 if __name__ == "__main__":

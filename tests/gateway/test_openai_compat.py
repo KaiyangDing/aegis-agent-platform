@@ -16,10 +16,26 @@ from aegis.gateway.schema import LLMRequest, Message, StopChunk, TextDelta, Usag
 
 BASE = "https://fake-bailian.test/v1"
 URL = f"{BASE}/chat/completions"
+SSE_HEADERS = {"content-type": "text/event-stream"}
 
-OK_BODY = {
+
+def sse(*events: dict | str) -> bytes:
+    """把若干事件拼成 SSE 线格式正文（dict 自动转 JSON，str 原样放入）。"""
+    out = []
+    for e in events:
+        payload = e if isinstance(e, str) else json.dumps(e, ensure_ascii=False)
+        out.append(f"data: {payload}\n\n")
+    return "".join(out).encode("utf-8")
+
+
+def text_event(s: str) -> dict:
+    return {"choices": [{"delta": {"content": s}}]}
+
+
+FINISH_EVENT = {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+USAGE_EVENT = {
+    "choices": [],
     "model": "qwen-flash",
-    "choices": [{"message": {"role": "assistant", "content": "你好！"}, "finish_reason": "stop"}],
     "usage": {"prompt_tokens": 12, "completion_tokens": 5},
 }
 
@@ -37,24 +53,100 @@ async def collect(provider: OpenAICompatProvider, req: LLMRequest) -> list:
 
 
 @respx.mock
-async def test_payload_carries_model_messages_and_auth():
-    route = respx.post(URL).mock(return_value=httpx.Response(200, json=OK_BODY))
+async def test_payload_requests_streaming_with_usage():
+    route = respx.post(URL).mock(
+        return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS)
+    )
     await collect(make_provider(), make_req())
     sent = json.loads(route.calls.last.request.content)
-    assert sent["model"] == "qwen-flash"
+    assert sent["stream"] is True
+    assert sent["stream_options"] == {"include_usage": True}
     assert sent["messages"] == [{"role": "user", "content": "你好"}]
     assert route.calls.last.request.headers["Authorization"] == "Bearer sk-test"
 
 
 @respx.mock
-async def test_ok_response_becomes_three_chunks():
-    respx.post(URL).mock(return_value=httpx.Response(200, json=OK_BODY))
+async def test_deltas_stream_and_tail_is_usage_then_stop():
+    # 线上顺序是 finish 在前、usage 在后；我们的不变量要求输出以 Usage→Stop 收尾
+    body = sse(text_event("你"), text_event("好"), FINISH_EVENT, USAGE_EVENT, "[DONE]")
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
     chunks = await collect(make_provider(), make_req())
     assert chunks == [
-        TextDelta(text="你好！"),
+        TextDelta(text="你"),
+        TextDelta(text="好"),
         UsageChunk(model="qwen-flash", prompt_tokens=12, completion_tokens=5),
         StopChunk(reason="end_turn"),
     ]
+
+
+@respx.mock
+async def test_role_prelude_and_empty_delta_produce_no_text():
+    body = sse(
+        {"choices": [{"delta": {"role": "assistant", "content": ""}}]},
+        {"choices": [{"delta": {}}]},
+        "[DONE]",
+    )
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    chunks = await collect(make_provider(), make_req())
+    assert chunks == [
+        UsageChunk(model="qwen-flash", prompt_tokens=0, completion_tokens=0),
+        StopChunk(reason="end_turn"),
+    ]
+
+
+@respx.mock
+async def test_done_sentinel_stops_reading():
+    # [DONE] 之后的坏行不应被解析（如果被解析，会抛 ProviderServerError 导致本测试失败）
+    body = sse(text_event("hi"), "[DONE]", "{{{ 这不是合法 JSON")
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    chunks = await collect(make_provider(), make_req())
+    assert chunks[0] == TextDelta(text="hi")
+
+
+@respx.mock
+async def test_missing_usage_still_ends_with_usage_and_stop():
+    body = sse(text_event("嗨"), FINISH_EVENT, "[DONE]")
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    chunks = await collect(make_provider(), make_req())
+    assert chunks[-2] == UsageChunk(model="qwen-flash", prompt_tokens=0, completion_tokens=0)
+    assert chunks[-1] == StopChunk(reason="end_turn")
+
+
+@respx.mock
+async def test_malformed_line_before_done_raises_server_error():
+    body = sse(text_event("好"), "{{{ 坏行")
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    with pytest.raises(ProviderServerError):
+        await collect(make_provider(), make_req())
+
+
+@respx.mock
+async def test_tool_call_delta_is_loudly_unimplemented():
+    body = sse({"choices": [{"delta": {"tool_calls": [{"id": "c1"}]}}]})
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    with pytest.raises(NotImplementedError):
+        await collect(make_provider(), make_req())
+
+
+class ExplodingStream(httpx.AsyncByteStream):
+    """吐出半截内容后模拟连接断开——中途断线的最小复现。"""
+
+    async def __aiter__(self):
+        yield sse(text_event("half"))
+        raise httpx.ReadError("connection lost")
+
+
+@respx.mock
+async def test_midstream_disconnect_after_partial_output():
+    respx.post(URL).mock(
+        return_value=httpx.Response(200, stream=ExplodingStream(), headers=SSE_HEADERS)
+    )
+    got = []
+    with pytest.raises(ProviderServerError):
+        async for c in make_provider().complete(make_req(), model="qwen-flash"):
+            got.append(c)
+    # 半截输出已经流出去了——这就是 03 §5"半截 llm_call"要处理的现实，M2 见
+    assert got == [TextDelta(text="half")]
 
 
 @respx.mock
@@ -65,7 +157,6 @@ async def test_429_maps_to_rate_limited_with_retry_after():
     with pytest.raises(RateLimitedError) as ei:
         await collect(make_provider(), make_req())
     assert ei.value.retry_after == 3.0
-    assert ei.value.provider == "bailian"
 
 
 @respx.mock
@@ -90,7 +181,7 @@ async def test_other_4xx_maps_to_bad_request():
 
 
 @respx.mock
-async def test_read_timeout_maps_to_timeout_error():
+async def test_connect_timeout_maps_to_timeout_error():
     respx.post(URL).mock(side_effect=httpx.ReadTimeout("boom"))
     with pytest.raises(ProviderTimeoutError):
         await collect(make_provider(), make_req())

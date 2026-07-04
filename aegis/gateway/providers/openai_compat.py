@@ -2,9 +2,12 @@
 
 职责边界：统一协议 ↔ OpenAI 线格式互译；HTTP 失败 ↔ 分类异常互译。
 不做重试/熔断/路由——那是上层组件的事，本文件保持"笨"。
-M1.2 范围：非流式、纯文本对话。流式在 M1.3，工具消息映射在 M1.4。
+M1.3 起为真流式（SSE）。工具消息映射在 M1.4。
+
+对外不变量：chunk 流永远以 UsageChunk、StopChunk 依次收尾，消费方可依赖。
 """
 
+import json
 from collections.abc import AsyncIterator
 from typing import Literal
 
@@ -50,31 +53,59 @@ class OpenAICompatProvider:
         if not self._api_key:
             raise AuthError(self.name, "API key 未配置（检查 .env 的 DASHSCOPE_API_KEY）")
         payload = self._build_payload(req, model)
+
+        usage: UsageChunk | None = None
+        stop_reason: Literal["end_turn", "tool_calls", "max_tokens"] = "end_turn"
         try:
-            resp = await self._client.post(
+            async with self._client.stream(
+                "POST",
                 f"{self._base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json=payload,
-            )
+            ) as resp:
+                if resp.status_code >= 400:
+                    # 流式模式下正文不自动加载，先显式读出来，错误详情才可用
+                    await resp.aread()
+                    self._raise_for_status(resp)
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue  # 空行=事件分隔；": xx" 开头=服务器心跳注释，都合法
+                    data_str = line[len("data:") :].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data_str)
+                    except json.JSONDecodeError as e:
+                        raise ProviderServerError(self.name, f"SSE 坏行: {data_str[:120]}") from e
+
+                    if event.get("usage"):
+                        u = event["usage"]
+                        usage = UsageChunk(
+                            model=event.get("model", model),
+                            prompt_tokens=u.get("prompt_tokens", 0),
+                            completion_tokens=u.get("completion_tokens", 0),
+                        )
+                    choices = event.get("choices") or []
+                    if not choices:
+                        continue  # usage 专属事件的 choices 是空列表
+                    choice = choices[0]
+                    delta = choice.get("delta") or {}
+                    if delta.get("tool_calls"):
+                        raise NotImplementedError("流式 tool-call 组装在 M1.4 实现")
+                    text = delta.get("content") or ""
+                    if text:
+                        yield TextDelta(text=text)  # ← yield 进了网络读取循环，如你所愿
+                    fr = choice.get("finish_reason")
+                    if fr:
+                        stop_reason = _FINISH_REASON_MAP.get(fr, "end_turn")
         except httpx.TimeoutException as e:
             raise ProviderTimeoutError(self.name, f"超时: {e!r}") from e
         except httpx.TransportError as e:
             raise ProviderServerError(self.name, f"连接失败: {e!r}") from e
-        self._raise_for_status(resp)
 
-        data = resp.json()
-        choice = data["choices"][0]
-        text = choice["message"].get("content") or ""
-        if text:
-            # 非流式实现走同一个流式接口：全文就是一个大 delta（M1.3 换真流式，接口不变）
-            yield TextDelta(text=text)
-        usage = data.get("usage") or {}
-        yield UsageChunk(
-            model=data.get("model", model),
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-        )
-        yield StopChunk(reason=_FINISH_REASON_MAP.get(choice.get("finish_reason"), "end_turn"))
+        # 不变量兑现：无论线上顺序如何、哪怕上游没发 usage，收尾永远是 Usage → Stop
+        yield usage or UsageChunk(model=model, prompt_tokens=0, completion_tokens=0)
+        yield StopChunk(reason=stop_reason)
 
     def _build_payload(self, req: LLMRequest, model: str) -> dict:
         messages = []
@@ -82,7 +113,12 @@ class OpenAICompatProvider:
             if m.role == "tool" or m.tool_calls:
                 raise NotImplementedError("工具消息的映射在 M1.4 实现")
             messages.append({"role": m.role, "content": m.content})
-        payload: dict = {"model": model, "messages": messages, "stream": False}
+        payload: dict = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},  # 流式默认不给账单，显式要
+        }
         if req.temperature is not None:
             payload["temperature"] = req.temperature
         if req.max_tokens is not None:
