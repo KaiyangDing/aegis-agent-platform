@@ -18,12 +18,10 @@ import httpx
 
 from aegis.gateway.errors import (
     AuthError,
-    BadRequestError,
     ProviderServerError,
     ProviderTimeoutError,
-    RateLimitedError,
 )
-from aegis.gateway.providers.base import shared_client
+from aegis.gateway.providers.base import raise_for_status, shared_client
 from aegis.gateway.schema import (
     LLMChunk,
     LLMRequest,
@@ -73,7 +71,7 @@ class OpenAICompatProvider:
                 if resp.status_code >= 400:
                     # 流式模式下正文不自动加载，先显式读出来，错误详情才可用
                     await resp.aread()
-                    self._raise_for_status(resp)
+                    raise_for_status(self.name, resp)
                 async for line in resp.aiter_lines():
                     if not line.startswith("data:"):
                         continue  # 空行=事件分隔；": xx" 开头=服务器心跳注释，都合法
@@ -171,16 +169,3 @@ class OpenAICompatProvider:
                 for tc in m.tool_calls
             ]
         return wire
-
-    def _raise_for_status(self, resp: httpx.Response) -> None:
-        if resp.status_code < 400:
-            return
-        snippet = resp.text[:200]  # 错误体只留 200 字符：够排障，防日志爆炸
-        if resp.status_code == 429:
-            ra = resp.headers.get("Retry-After")
-            raise RateLimitedError(self.name, snippet, retry_after=float(ra) if ra else None)
-        if resp.status_code in (401, 403):
-            raise AuthError(self.name, snippet)
-        if resp.status_code >= 500:
-            raise ProviderServerError(self.name, f"HTTP {resp.status_code}: {snippet}")
-        raise BadRequestError(self.name, f"HTTP {resp.status_code}: {snippet}")

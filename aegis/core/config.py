@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     dashscope_api_key: SecretStr = SecretStr("")
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+    anthropic_api_key: SecretStr = SecretStr("")
+    anthropic_base_url: str = "https://api.anthropic.com"
+
     # 基础设施连接串，默认值就是下一步 docker-compose 的本地地址
     database_url: str = "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis"
     redis_url: str = "redis://localhost:6379/0"

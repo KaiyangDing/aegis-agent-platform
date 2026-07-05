@@ -5,6 +5,12 @@ from typing import Protocol
 
 import httpx
 
+from aegis.gateway.errors import (
+    AuthError,
+    BadRequestError,
+    ProviderServerError,
+    RateLimitedError,
+)
 from aegis.gateway.schema import LLMChunk, LLMRequest
 
 
@@ -30,3 +36,18 @@ def shared_client() -> httpx.AsyncClient:
             timeout=httpx.Timeout(connect=5.0, read=90.0, write=10.0, pool=5.0)
         )
     return _client
+
+
+def raise_for_status(provider_name: str, resp: httpx.Response) -> None:
+    """HTTP 状态码 → 分类异常的统一翻译表。所有适配器共用，防止两份表漂移。"""
+    if resp.status_code < 400:
+        return
+    snippet = resp.text[:200]  # 错误体只留 200 字符：够排障，防日志爆炸
+    if resp.status_code == 429:
+        ra = resp.headers.get("Retry-After")
+        raise RateLimitedError(provider_name, snippet, retry_after=float(ra) if ra else None)
+    if resp.status_code in (401, 403):
+        raise AuthError(provider_name, snippet)
+    if resp.status_code >= 500:
+        raise ProviderServerError(provider_name, f"HTTP {resp.status_code}: {snippet}")
+    raise BadRequestError(provider_name, f"HTTP {resp.status_code}: {snippet}")
