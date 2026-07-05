@@ -209,3 +209,43 @@ def test_parse_routes_rejects_bad_entries():
         parse_routes({"fast": ["no-colon-here"]}, {"bailian"})
     with pytest.raises(ValueError):
         parse_routes({"fast": ["ghost:qwen-flash"]}, {"bailian"})
+
+
+class StubCache:
+    def __init__(self, hit: list | None = None):
+        self.hit = hit
+        self.puts: list[list] = []
+
+    async def get(self, req):
+        return self.hit
+
+    async def put(self, req, chunks):
+        self.puts.append(list(chunks))
+
+
+async def test_cache_hit_short_circuits_everything():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, breaker, limiter = make_gw([p1], cache=StubCache(hit=OK_CHUNKS))
+    got = await collect(gw)
+    assert p1.calls == 0
+    assert limiter.asked == []  # 连租户配额都没问——最外圈短路
+    usage = [c for c in got if isinstance(c, UsageChunk)][0]
+    assert usage.cached is True  # 回放的账单盖了缓存章
+
+
+async def test_cache_miss_stores_full_stream():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    cache = StubCache(hit=None)
+    gw, _, _ = make_gw([p1], cache=cache)
+    await collect(gw)
+    assert cache.puts == [OK_CHUNKS]  # 完整流入库
+
+
+async def test_midstream_failure_is_never_cached():
+    p1 = HalfwayProvider("p1")
+    cache = StubCache(hit=None)
+    gw, _, _ = make_gw([p1], cache=cache)
+    with pytest.raises(ProviderServerError):
+        async for _ in gw.complete(make_req()):
+            pass
+    assert cache.puts == []  # 事故绝不能变成可重放的事故

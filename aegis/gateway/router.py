@@ -26,7 +26,7 @@ from aegis.gateway.errors import (
 )
 from aegis.gateway.providers.base import Provider
 from aegis.gateway.resilience import RetryPolicy, complete_with_retry
-from aegis.gateway.schema import LLMChunk, LLMRequest
+from aegis.gateway.schema import LLMChunk, LLMRequest, UsageChunk
 
 _PROBE_POLICY = RetryPolicy(max_attempts=1)  # 探针一次定胜负，别拿重试预算拖长半开期
 _BREAKER_COUNTED = (ProviderServerError, ProviderTimeoutError)
@@ -44,6 +44,11 @@ class LimiterLike(Protocol):
     async def wait_take(
         self, scope: str, rate: float, capacity: float, *, max_wait: float = 10.0, cost: float = 1.0
     ) -> bool: ...
+
+
+class CacheLike(Protocol):
+    async def get(self, req: LLMRequest) -> list[LLMChunk] | None: ...
+    async def put(self, req: LLMRequest, chunks: list[LLMChunk]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -104,6 +109,7 @@ class LLMGateway:
         routes: dict[str, list[Candidate]],
         breaker: BreakerLike,
         limiter: LimiterLike,
+        cache: CacheLike | None = None,
         limits: GatewayLimits | None = None,
         retry_policy: RetryPolicy | None = None,
         fault_rate: float = 0.0,
@@ -113,12 +119,23 @@ class LLMGateway:
         self._routes = routes
         self._breaker = breaker
         self._limiter = limiter
+        self._cache = cache
         self._limits = limits or GatewayLimits()
         self._retry_policy = retry_policy or RetryPolicy()
         self._fault_rate = fault_rate
         self._fault_targets = fault_targets
 
     async def complete(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
+        # 最外圈：缓存命中 = 零上游成本，不该消耗任何配额、不该问任何闸门
+        if self._cache is not None:
+            hit = await self._cache.get(req)
+            if hit is not None:
+                for chunk in hit:
+                    if isinstance(chunk, UsageChunk):
+                        chunk = chunk.model_copy(update={"cached": True})  # 盖缓存章
+                    yield chunk
+                return
+
         # 红线二：租户配额在候选环外——换供应商换不掉租户身份
         ok = await self._limiter.wait_take(
             f"tenant:{req.tenant_id}",
@@ -152,11 +169,16 @@ class LLMGateway:
 
             policy = _PROBE_POLICY if decision == "probe" else self._retry_policy
             yielded = False
+            buffer: list[LLMChunk] = []
             try:
                 async for chunk in complete_with_retry(target, req, cand.model, policy):
                     yielded = True
+                    if self._cache is not None:
+                        buffer.append(chunk)
                     yield chunk
                 await self._breaker.on_success(cand.provider)
+                if self._cache is not None:
+                    await self._cache.put(req, buffer)  # 只有完整走完才会执行到这
                 return
             except _BREAKER_COUNTED as e:
                 await self._breaker.on_failure(cand.provider)

@@ -3,6 +3,7 @@
 from aegis.core.config import get_settings
 from aegis.core.redis import get_redis
 from aegis.gateway.breaker import CircuitBreaker
+from aegis.gateway.cache import ExactCache
 from aegis.gateway.providers.anthropic import AnthropicProvider
 from aegis.gateway.providers.base import Provider
 from aegis.gateway.providers.openai_compat import OpenAICompatProvider
@@ -26,6 +27,9 @@ def build_gateway() -> LLMGateway:
         routes=parse_routes(s.model_routes, set(providers)),
         breaker=CircuitBreaker(redis),
         limiter=RateLimiter(redis),
+        cache=ExactCache(redis, ttl_seconds=s.cache_ttl_seconds)
+        if s.cache_ttl_seconds > 0
+        else None,
         limits=GatewayLimits(
             provider_rate=s.provider_rate,
             provider_burst=s.provider_burst,

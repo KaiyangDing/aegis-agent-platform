@@ -68,9 +68,10 @@ class ToolCallChunk(BaseModel):
 
 class UsageChunk(BaseModel):
     type: Literal["usage"] = "usage"
-    model: str  # 实际执行的模型（路由/降级后可能变）
+    model: str
     prompt_tokens: int
     completion_tokens: int
+    cached: bool = False  # 缓存回放时置 True：计量器据此不重复记账
 
 
 class StopChunk(BaseModel):
@@ -84,3 +85,4 @@ LLMChunk = Annotated[
 ]
 
 chunk_adapter: TypeAdapter[LLMChunk] = TypeAdapter(LLMChunk)
+chunk_list_adapter: TypeAdapter[list[LLMChunk]] = TypeAdapter(list[LLMChunk])

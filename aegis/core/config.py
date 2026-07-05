@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     tenant_rate: float = 5.0  # 每租户出站 QPS
     tenant_burst: float = 10.0
     limiter_max_wait: float = 10.0  # 限流排队预算
+    cache_ttl_seconds: int = 300  # 精确缓存 TTL；0 = 关闭缓存
     fault_injection_rate: float = 0.0  # 故障注入概率（0=关闭）
     fault_injection_targets: list[str] = []  # 注入目标，如 ["bailian:qwen-plus"]
 
