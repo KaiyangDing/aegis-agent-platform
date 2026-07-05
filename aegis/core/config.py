@@ -28,6 +28,21 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis"
     redis_url: str = "redis://localhost:6379/0"
 
+    # —— 网关路由与限流（M1.9）——
+    # 档位 → 候选链（"provider:model"，按序 fallback）。环境变量可用 JSON 覆盖。
+    model_routes: dict[str, list[str]] = {
+        "fast": ["bailian:qwen-flash", "bailian:qwen-turbo"],
+        "standard": ["bailian:qwen-plus", "bailian:deepseek-v3"],
+        "strong": ["bailian:qwen-max", "bailian:deepseek-v3"],
+    }
+    provider_rate: float = 8.0  # 每供应商出站 QPS（演示值，压测后调）
+    provider_burst: float = 16.0
+    tenant_rate: float = 5.0  # 每租户出站 QPS
+    tenant_burst: float = 10.0
+    limiter_max_wait: float = 10.0  # 限流排队预算
+    fault_injection_rate: float = 0.0  # 故障注入概率（0=关闭）
+    fault_injection_targets: list[str] = []  # 注入目标，如 ["bailian:qwen-plus"]
+
 
 @lru_cache
 def get_settings() -> Settings:

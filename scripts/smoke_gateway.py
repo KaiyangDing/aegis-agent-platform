@@ -1,30 +1,24 @@
-"""第一次真实调用百炼的冒烟脚本（手动运行，花真钱：qwen-flash 一次 < 0.01 元）。
+"""通过完整网关的冒烟：只声明档位，模型由路由决定（需要本地 Redis 在跑）。
 
 uv run python scripts/smoke_gateway.py
 """
 
 import asyncio
 
-from aegis.core.config import get_settings
-from aegis.gateway.providers.openai_compat import OpenAICompatProvider
+from aegis.gateway.factory import build_gateway
 from aegis.gateway.schema import LLMRequest, Message, TextDelta
 
 
 async def main() -> None:
-    settings = get_settings()
-    provider = OpenAICompatProvider(
-        name="bailian",
-        base_url=settings.dashscope_base_url,
-        api_key=settings.dashscope_api_key.get_secret_value(),
-    )
+    gw = build_gateway()
     req = LLMRequest(
         tier="fast",
         tenant_id="smoke",
         messages=[Message(role="user", content="用一句话说明你是什么模型。")],
     )
-    async for chunk in provider.complete(req, model="qwen-flash"):
+    async for chunk in gw.complete(req):
         if isinstance(chunk, TextDelta):
-            print(chunk.text, end="", flush=True)  # 亲眼看 token 逐块到达
+            print(chunk.text, end="", flush=True)
         else:
             print(f"\n{chunk}")
 
