@@ -1,27 +1,9 @@
 import asyncio
-import os
 import uuid
 
-import pytest
 import redis.asyncio as aioredis
 
 from aegis.gateway.breaker import CircuitBreaker
-
-# 9 号逻辑库专供测试——不碰开发数据（0 号库）
-TEST_REDIS_URL = os.environ.get("AEGIS_TEST_REDIS_URL", "redis://localhost:6379/9")
-
-
-@pytest.fixture
-async def r():
-    client = aioredis.from_url(TEST_REDIS_URL, decode_responses=True)
-    try:
-        await client.ping()
-    except Exception:
-        if os.environ.get("CI"):
-            raise  # CI 里 Redis 必须在——静默跳过等于守卫失效
-        pytest.skip("本地 Redis 未启动：docker compose -f deploy/docker-compose.yml up -d")
-    yield client
-    await client.aclose()
 
 
 def name() -> str:
