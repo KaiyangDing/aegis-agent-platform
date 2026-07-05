@@ -12,7 +12,16 @@ from aegis.gateway.errors import (
     RateLimitedError,
 )
 from aegis.gateway.providers.openai_compat import OpenAICompatProvider
-from aegis.gateway.schema import LLMRequest, Message, StopChunk, TextDelta, UsageChunk
+from aegis.gateway.schema import (
+    LLMRequest,
+    Message,
+    StopChunk,
+    TextDelta,
+    ToolCall,
+    ToolCallChunk,
+    ToolSpec,
+    UsageChunk,
+)
 
 BASE = "https://fake-bailian.test/v1"
 URL = f"{BASE}/chat/completions"
@@ -120,14 +129,6 @@ async def test_malformed_line_before_done_raises_server_error():
         await collect(make_provider(), make_req())
 
 
-@respx.mock
-async def test_tool_call_delta_is_loudly_unimplemented():
-    body = sse({"choices": [{"delta": {"tool_calls": [{"id": "c1"}]}}]})
-    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
-    with pytest.raises(NotImplementedError):
-        await collect(make_provider(), make_req())
-
-
 class ExplodingStream(httpx.AsyncByteStream):
     """吐出半截内容后模拟连接断开——中途断线的最小复现。"""
 
@@ -190,3 +191,146 @@ async def test_connect_timeout_maps_to_timeout_error():
 async def test_empty_api_key_fails_fast_without_any_network():
     with pytest.raises(AuthError):
         await collect(make_provider(api_key=""), make_req())
+
+
+# ---------- M1.4 工具映射 ----------
+
+WEATHER_TOOL = ToolSpec(
+    name="get_weather",
+    description="查天气",
+    parameters={"type": "object", "properties": {"city": {"type": "string"}}},
+)
+
+
+def tc_frag(
+    index: int, *, id: str | None = None, name: str | None = None, args: str | None = None
+) -> dict:
+    fn: dict = {}
+    if name is not None:
+        fn["name"] = name
+    if args is not None:
+        fn["arguments"] = args
+    frag: dict = {"index": index, "function": fn}
+    if id is not None:
+        frag["id"] = id
+    return frag
+
+
+def tool_event(*frags: dict) -> dict:
+    return {"choices": [{"delta": {"tool_calls": list(frags)}}]}
+
+
+@respx.mock
+async def test_tools_spec_mapped_into_payload():
+    route = respx.post(URL).mock(
+        return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS)
+    )
+    req = LLMRequest(
+        tier="fast",
+        tenant_id="t1",
+        messages=[Message(role="user", content="天气")],
+        tools=[WEATHER_TOOL],
+    )
+    await collect(make_provider(), req)
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "查天气",
+                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+            },
+        }
+    ]
+
+
+@respx.mock
+async def test_tool_round_history_mapped_to_wire():
+    route = respx.post(URL).mock(
+        return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS)
+    )
+    req = LLMRequest(
+        tier="fast",
+        tenant_id="t1",
+        messages=[
+            Message(role="user", content="查订单"),
+            Message(
+                role="assistant",
+                tool_calls=[
+                    ToolCall(id="call_7", name="order_query", arguments_json='{"order_id":"A1"}')
+                ],
+            ),
+            Message(role="tool", tool_call_id="call_7", content='{"status":"shipped"}'),
+        ],
+    )
+    await collect(make_provider(), req)
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["messages"][1] == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_7",
+                "type": "function",
+                "function": {"name": "order_query", "arguments": '{"order_id":"A1"}'},
+            }
+        ],
+    }
+    assert sent["messages"][2] == {
+        "role": "tool",
+        "tool_call_id": "call_7",
+        "content": '{"status":"shipped"}',
+    }
+
+
+@respx.mock
+async def test_streaming_fragments_assemble_into_whole_tool_call():
+    body = sse(
+        tool_event(tc_frag(0, id="call_9", name="get_weather", args="")),
+        tool_event(tc_frag(0, args='{"ci')),
+        tool_event(tc_frag(0, args='ty":"杭州"}')),
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+        "[DONE]",
+    )
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    chunks = await collect(make_provider(), make_req())
+    assert chunks == [
+        ToolCallChunk(
+            tool_call=ToolCall(id="call_9", name="get_weather", arguments_json='{"city":"杭州"}')
+        ),
+        UsageChunk(model="qwen-flash", prompt_tokens=0, completion_tokens=0),
+        StopChunk(reason="tool_calls"),
+    ]
+
+
+@respx.mock
+async def test_parallel_tool_calls_keep_index_order():
+    body = sse(
+        tool_event(tc_frag(0, id="a", name="f1", args='{"x":1}')),
+        tool_event(tc_frag(1, id="b", name="f2", args='{"y":2}')),
+        tool_event(tc_frag(0, args=" ")),  # 碎片乱序交错：按 index 聚合，不按到达顺序
+        "[DONE]",
+    )
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    chunks = await collect(make_provider(), make_req())
+    tool_chunks = [c for c in chunks if isinstance(c, ToolCallChunk)]
+    assert [c.tool_call.id for c in tool_chunks] == ["a", "b"]
+    assert tool_chunks[0].tool_call.arguments_json == '{"x":1} '
+
+
+@respx.mock
+async def test_text_then_tool_calls_respect_chunk_order_invariant():
+    body = sse(
+        text_event("我来查一下。"),
+        tool_event(tc_frag(0, id="c", name="get_weather", args="{}")),
+        "[DONE]",
+    )
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    chunks = await collect(make_provider(), make_req())
+    assert [type(c).__name__ for c in chunks] == [
+        "TextDelta",
+        "ToolCallChunk",
+        "UsageChunk",
+        "StopChunk",
+    ]

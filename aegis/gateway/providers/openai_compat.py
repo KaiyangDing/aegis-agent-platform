@@ -2,14 +2,17 @@
 
 职责边界：统一协议 ↔ OpenAI 线格式互译；HTTP 失败 ↔ 分类异常互译。
 不做重试/熔断/路由——那是上层组件的事，本文件保持"笨"。
-M1.3 起为真流式（SSE）。工具消息映射在 M1.4。
+M1.3 起为真流式（SSE）；M1.4 起支持 tool-call 双向映射（增量碎片按 index 内部组装）。
+
+对外不变量：chunk 顺序恒为 TextDelta* → ToolCallChunk* → UsageChunk → StopChunk；
+文本逐块流式，工具调用整体交付。消费方可依赖此顺序。
 
 对外不变量：chunk 流永远以 UsageChunk、StopChunk 依次收尾，消费方可依赖。
 """
 
 import json
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -24,8 +27,11 @@ from aegis.gateway.providers.base import shared_client
 from aegis.gateway.schema import (
     LLMChunk,
     LLMRequest,
+    Message,
     StopChunk,
     TextDelta,
+    ToolCall,
+    ToolCallChunk,
     UsageChunk,
 )
 
@@ -56,6 +62,7 @@ class OpenAICompatProvider:
 
         usage: UsageChunk | None = None
         stop_reason: Literal["end_turn", "tool_calls", "max_tokens"] = "end_turn"
+        pending: dict[int, dict[str, Any]] = {}  # index → 组装中的 tool_call
         try:
             async with self._client.stream(
                 "POST",
@@ -90,11 +97,19 @@ class OpenAICompatProvider:
                         continue  # usage 专属事件的 choices 是空列表
                     choice = choices[0]
                     delta = choice.get("delta") or {}
-                    if delta.get("tool_calls"):
-                        raise NotImplementedError("流式 tool-call 组装在 M1.4 实现")
+                    for frag in delta.get("tool_calls") or []:
+                        idx = frag.get("index", 0)
+                        slot = pending.setdefault(idx, {"id": "", "name": "", "args": []})
+                        if frag.get("id"):
+                            slot["id"] = frag["id"]
+                        fn = frag.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            slot["args"].append(fn["arguments"])
                     text = delta.get("content") or ""
                     if text:
-                        yield TextDelta(text=text)  # ← yield 进了网络读取循环，如你所愿
+                        yield TextDelta(text=text)
                     fr = choice.get("finish_reason")
                     if fr:
                         stop_reason = _FINISH_REASON_MAP.get(fr, "end_turn")
@@ -103,27 +118,59 @@ class OpenAICompatProvider:
         except httpx.TransportError as e:
             raise ProviderServerError(self.name, f"连接失败: {e!r}") from e
 
-        # 不变量兑现：无论线上顺序如何、哪怕上游没发 usage，收尾永远是 Usage → Stop
+        # 不变量兑现：ToolCall* → Usage → Stop 收尾（文本已在循环中流出）
+        for idx in sorted(pending):
+            slot = pending[idx]
+            yield ToolCallChunk(
+                tool_call=ToolCall(
+                    id=slot["id"] or f"call_{idx}",  # 个别兼容方言不发 id，兜底合成
+                    name=slot["name"],
+                    arguments_json="".join(slot["args"]),
+                )
+            )
         yield usage or UsageChunk(model=model, prompt_tokens=0, completion_tokens=0)
         yield StopChunk(reason=stop_reason)
 
     def _build_payload(self, req: LLMRequest, model: str) -> dict:
-        messages = []
-        for m in req.messages:
-            if m.role == "tool" or m.tool_calls:
-                raise NotImplementedError("工具消息的映射在 M1.4 实现")
-            messages.append({"role": m.role, "content": m.content})
         payload: dict = {
             "model": model,
-            "messages": messages,
+            "messages": [self._to_wire_message(m) for m in req.messages],
             "stream": True,
-            "stream_options": {"include_usage": True},  # 流式默认不给账单，显式要
+            "stream_options": {"include_usage": True},
         }
+        if req.tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in req.tools
+            ]
         if req.temperature is not None:
             payload["temperature"] = req.temperature
         if req.max_tokens is not None:
             payload["max_tokens"] = req.max_tokens
         return payload
+
+    def _to_wire_message(self, m: Message) -> dict:
+        if m.role == "tool":
+            return {"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content}
+        wire: dict = {"role": m.role, "content": m.content}
+        if m.tool_calls:
+            wire["content"] = m.content or None  # 纯工具轮 content 为空 → 线上惯例发 null
+            wire["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.name, "arguments": tc.arguments_json},
+                }
+                for tc in m.tool_calls
+            ]
+        return wire
 
     def _raise_for_status(self, resp: httpx.Response) -> None:
         if resp.status_code < 400:
