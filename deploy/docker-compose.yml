@@ -9,7 +9,9 @@ services:
       POSTGRES_PASSWORD: aegis    # 仅开发环境；生产走 secrets，不写在文件里
       POSTGRES_DB: aegis
     ports:
-      - "5432:5432"               # 左边=宿主机端口(localhost 连的就是它)，右边=容器内端口
+      # 只绑回环：不写 127.0.0.1 时 Docker 默认绑 0.0.0.0，公共 Wi-Fi 下同网段可直连
+      # （审计加固 B）。代码本来就连 localhost，此改动零成本
+      - "127.0.0.1:5432:5432"     # 左边=宿主机端口(localhost 连的就是它)，右边=容器内端口
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +24,7 @@ services:
     image: redis:7-alpine
     container_name: aegis-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"     # 同上：Redis 是网关的整个状态平面，绝不暴露到网卡
     volumes:
       - redis_data:/data
     healthcheck:

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 300  # 精确缓存 TTL；0 = 关闭缓存
     fault_injection_rate: float = 0.0  # 故障注入概率（0=关闭）
     fault_injection_targets: list[str] = []  # 注入目标，如 ["bailian:qwen-plus"]
+
+    @model_validator(mode="after")
+    def _no_fault_injection_in_prod(self) -> "Settings":
+        # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
+        # 与 parse_routes 同一哲学：配置错误在启动时炸，不在凌晨的流量里炸（审计加固 B）
+        if self.app_env == "prod" and self.fault_injection_rate > 0:
+            raise ValueError("prod 环境禁止开启故障注入（fault_injection_rate 必须为 0）")
+        return self
 
 
 @lru_cache

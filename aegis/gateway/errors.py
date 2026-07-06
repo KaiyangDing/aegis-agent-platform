@@ -50,8 +50,27 @@ class GatewayOverloadedError(GatewayError):
 
 
 class GatewayExhausted(GatewayError):
-    """重试与 fallback 全部用尽。L2 只会见到它和 BudgetExceeded（契约 03 §7）。"""
+    """重试与 fallback 全部用尽（发生在首块之前，未产生任何输出）。
+
+    契约（03 §7，加固 B 定稿）：L2 可见的网关异常分两类——
+    请求级（首块前，可整体降级）：GatewayExhausted / BudgetExceeded /
+        TenantQuotaExceeded / GatewayOverloadedError；
+    流级（首块后，进恢复语义）：GatewayStreamInterrupted。
+    ProviderError 家族永远不穿出网关。
+    """
 
 
 class BudgetExceeded(GatewayError):
     """token 预算闸门触发（M1.11 起逐步接入）。"""
+
+
+class TenantQuotaExceeded(GatewayError):
+    """租户级出站配额耗尽。换供应商无解（配额跟租户走），调用方应直接降级或提示。"""
+
+
+class GatewayStreamInterrupted(GatewayError):
+    """流已开始后中断：消费方已收到部分 chunk，且绝不会被换路重放（红线一）。
+
+    L2 的"半截 llm_call"恢复语义（03 §5：作废重发 + 前端消息重置帧）以捕获
+    本异常为入口；原始死因保留在 __cause__ 上。
+    """

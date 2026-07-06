@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   pull_request:
 
+# 最小权限：本 workflow 只需要读代码。GITHUB_TOKEN 默认权限过宽（审计加固 B）
+permissions:
+  contents: read
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -19,11 +23,12 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
+      # action 钉到完整 commit SHA：tag 可被上游重指恶意提交，SHA 不可变（审计加固 B）
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true          # 缓存依赖下载，第二次起 CI 明显变快
 

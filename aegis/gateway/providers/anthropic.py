@@ -17,7 +17,7 @@ from aegis.gateway.errors import (
     ProviderServerError,
     ProviderTimeoutError,
 )
-from aegis.gateway.providers.base import raise_for_status, shared_client
+from aegis.gateway.providers.base import raise_for_status, sanitize_error_text, shared_client
 from aegis.gateway.schema import (
     LLMChunk,
     LLMRequest,
@@ -82,7 +82,9 @@ class AnthropicProvider:
                     try:
                         event = json.loads(data_str)
                     except json.JSONDecodeError as e:
-                        raise ProviderServerError(self.name, f"SSE 坏行: {data_str[:120]}") from e
+                        raise ProviderServerError(
+                            self.name, f"SSE 坏行: {sanitize_error_text(data_str, 120)}"
+                        ) from e
 
                     etype = event.get("type")
                     if etype == "message_start":
@@ -119,9 +121,9 @@ class AnthropicProvider:
                         break
                     elif etype == "error":
                         err = event.get("error") or {}
+                        detail = sanitize_error_text(str(err.get("message", "")), 120)
                         raise ProviderServerError(
-                            self.name,
-                            f"流内错误 {err.get('type')}: {str(err.get('message', ''))[:120]}",
+                            self.name, f"流内错误 {err.get('type')}: {detail}"
                         )
                     # ping 等其余事件类型：无视
         except httpx.PoolTimeout as e:

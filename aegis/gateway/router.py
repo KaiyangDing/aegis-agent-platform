@@ -21,9 +21,11 @@ from aegis.gateway.errors import (
     AuthError,
     BadRequestError,
     GatewayExhausted,
+    GatewayStreamInterrupted,
     ProviderServerError,
     ProviderTimeoutError,
     RateLimitedError,
+    TenantQuotaExceeded,
 )
 from aegis.gateway.providers.base import Provider
 from aegis.gateway.resilience import RetryPolicy, complete_with_retry
@@ -165,7 +167,8 @@ class LLMGateway:
             max_wait=self._limits.max_wait,
         )
         if not ok:
-            raise RateLimitedError("tenant-quota", f"租户 {req.tenant_id} 出站配额耗尽")
+            # 契约内类型（加固 B）：租户配额不是"某供应商限流"，不许冒充 ProviderError
+            raise TenantQuotaExceeded(f"租户 {req.tenant_id} 出站配额耗尽")
 
         last_error: Exception | None = None
         for cand in candidates:
@@ -208,15 +211,17 @@ class LLMGateway:
             except _BREAKER_COUNTED as e:
                 await self._breaker.on_failure(cand.provider)
                 if yielded:
-                    raise  # 红线一：半截不换路
+                    # 红线一：半截不换路。包装成契约内的流中断类型（加固 B）——
+                    # ProviderError 家族不穿出网关，原始死因在 __cause__
+                    raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
                 last_error = e
             except RateLimitedError as e:
                 if yielded:
-                    raise
+                    raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
                 last_error = e  # 429 不记熔断账：上游活着，只是挤
             except (AuthError, BadRequestError) as e:
                 if yielded:
-                    raise
+                    raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
                 last_error = e  # 本家的配置/转换问题，别家未必过不去
 
         raise GatewayExhausted(f"档位 {req.tier} 的所有候选均不可用") from last_error

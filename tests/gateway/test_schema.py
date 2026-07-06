@@ -51,3 +51,17 @@ def test_request_ids_are_unique():
     r1 = LLMRequest(tier="fast", messages=_msg(), tenant_id="t1")
     r2 = LLMRequest(tier="fast", messages=_msg(), tenant_id="t1")
     assert r1.request_id != r2.request_id
+
+
+# ---------- 审计加固 B：tenant_id 是要拼进 Redis key 的内部标识符 ----------
+
+
+def test_tenant_id_rejects_empty_and_key_breaking_chars():
+    for bad in ["", "tA:evil", "tA*", "租户甲", "a" * 65]:
+        with pytest.raises(ValidationError):
+            LLMRequest(tier="fast", messages=_msg(), tenant_id=bad)
+
+
+def test_tenant_id_accepts_normal_identifiers():
+    for ok in ["t1", "tenant-a", "TENANT_B", "a" * 64]:
+        assert LLMRequest(tier="fast", messages=_msg(), tenant_id=ok).tenant_id == ok

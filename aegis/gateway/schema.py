@@ -48,7 +48,10 @@ class LLMRequest(BaseModel):
     tools: list[ToolSpec] = []
     temperature: float | None = None  # None = 用供应商默认值
     max_tokens: int | None = None
-    tenant_id: str  # 计量/缓存/限流都按租户算账，必填
+    # 计量/缓存/限流都按租户算账，必填。这是内部标识符不是显示名（API 层负责
+    # 认证→标识的映射）：字符集收紧到可安全拼入 Redis key——空串/冒号/通配符
+    # 会破坏租户隔离前缀与 SCAN 运维（审计加固 B 的纵深防御）
+    tenant_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     session_id: str | None = None  # 进 usage_ledger，会话维度对账用
     request_id: str = Field(default_factory=lambda: uuid4().hex)
 

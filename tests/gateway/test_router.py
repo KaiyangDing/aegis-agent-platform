@@ -4,8 +4,10 @@ from aegis.gateway import resilience
 from aegis.gateway.errors import (
     GatewayExhausted,
     GatewayOverloadedError,
+    GatewayStreamInterrupted,
     ProviderServerError,
     RateLimitedError,
+    TenantQuotaExceeded,
 )
 from aegis.gateway.resilience import RetryPolicy
 from aegis.gateway.router import Candidate, GatewayLimits, LLMGateway, parse_routes
@@ -141,9 +143,11 @@ async def test_midstream_failure_never_falls_back():
     p1, p2 = HalfwayProvider("p1"), FakeProvider("p2", [OK_CHUNKS])
     gw, breaker, _ = make_gw([p1, p2])
     got = []
-    with pytest.raises(ProviderServerError):
+    # 加固 B 契约：流中断以 GatewayStreamInterrupted 出面，原始死因在 __cause__
+    with pytest.raises(GatewayStreamInterrupted) as ei:
         async for c in gw.complete(make_req()):
             got.append(c)
+    assert isinstance(ei.value.__cause__, ProviderServerError)
     assert got == [TextDelta(text="half")]  # 半截已流出
     assert p2.calls == 0  # 红线一：绝不换路重放
     assert breaker.failures == ["p1"]  # 但账照记
@@ -170,7 +174,8 @@ async def test_rate_limited_falls_back_without_breaker_count():
 async def test_tenant_quota_exhausted_fails_before_any_provider():
     p1 = FakeProvider("p1", [OK_CHUNKS])
     gw, _, _ = make_gw([p1], limiter=StubLimiter(deny={"tenant:t1"}))
-    with pytest.raises(RateLimitedError):
+    # 加固 B 契约：租户配额是契约内类型，不再冒充某个供应商的 429
+    with pytest.raises(TenantQuotaExceeded):
         await collect(gw)
     assert p1.calls == 0  # 红线二：租户配额环外把关
 
@@ -246,7 +251,7 @@ async def test_midstream_failure_is_never_cached():
     p1 = HalfwayProvider("p1")
     cache = StubCache(hit=None)
     gw, _, _ = make_gw([p1], cache=cache)
-    with pytest.raises(ProviderServerError):
+    with pytest.raises(GatewayStreamInterrupted):
         async for _ in gw.complete(make_req()):
             pass
     assert cache.puts == []  # 事故绝不能变成可重放的事故

@@ -33,3 +33,14 @@ def test_rate_limits_must_be_positive():
     # 审计加固 A：速率写成 0 会让 Lua 的 capacity/rate 溢出——环境变量写错要在启动时炸
     with pytest.raises(ValidationError):
         Settings(_env_file=None, provider_rate=0)
+
+
+def test_prod_forbids_fault_injection():
+    # 实验开关误带上生产：启动即炸，不在凌晨的真实流量里炸
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, app_env="prod", fault_injection_rate=0.3)
+
+
+def test_staging_and_dev_allow_fault_injection():
+    s = Settings(_env_file=None, app_env="dev", fault_injection_rate=0.3)
+    assert s.fault_injection_rate == 0.3

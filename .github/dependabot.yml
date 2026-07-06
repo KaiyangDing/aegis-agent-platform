@@ -1,0 +1,12 @@
+# 依赖与 Action 的漏洞/更新监控（审计加固 B）：
+# httpx/redis/pydantic 出 CVE、或钉扎的 action SHA 需要升级时自动开 PR 提醒。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"

@@ -1,5 +1,6 @@
 """供应商适配器的公共契约与共享 HTTP 客户端。"""
 
+import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -43,6 +44,19 @@ def shared_client() -> httpx.AsyncClient:
     return _client
 
 
+_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{8,}")
+
+
+def sanitize_error_text(text: str, limit: int = 200) -> str:
+    """外部错误文本进入我们的异常前统一消毒：截断 + API key 模式打码。
+
+    上游错误体不受我方控制：401 体惯例回显 key 片段（'Incorrect API key: sk-...'），
+    400 体可能回显用户输入。异常文本会进日志与异常链（__cause__），
+    是展示层 masker 罩不住的旁路——必须在源头消毒（审计加固 B）。
+    """
+    return _KEY_PATTERN.sub("sk-***", text[:limit])
+
+
 def parse_retry_after(value: str | None) -> float | None:
     """Retry-After 按 RFC 7231 允许两种格式：秒数 或 HTTP-date。
 
@@ -69,7 +83,7 @@ def raise_for_status(provider_name: str, resp: httpx.Response) -> None:
     """
     if resp.status_code < 400:
         return
-    snippet = resp.text[:200]  # 错误体只留 200 字符：够排障，防日志爆炸
+    snippet = sanitize_error_text(resp.text)  # 截断 + key 打码：够排障，不泄密
     if resp.status_code == 429:
         raise RateLimitedError(
             provider_name, snippet, retry_after=parse_retry_after(resp.headers.get("Retry-After"))

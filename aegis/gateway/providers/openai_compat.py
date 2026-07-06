@@ -21,7 +21,7 @@ from aegis.gateway.errors import (
     ProviderServerError,
     ProviderTimeoutError,
 )
-from aegis.gateway.providers.base import raise_for_status, shared_client
+from aegis.gateway.providers.base import raise_for_status, sanitize_error_text, shared_client
 from aegis.gateway.schema import (
     LLMChunk,
     LLMRequest,
@@ -83,14 +83,16 @@ class OpenAICompatProvider:
                     try:
                         event = json.loads(data_str)
                     except json.JSONDecodeError as e:
-                        raise ProviderServerError(self.name, f"SSE 坏行: {data_str[:120]}") from e
+                        raise ProviderServerError(
+                            self.name, f"SSE 坏行: {sanitize_error_text(data_str, 120)}"
+                        ) from e
 
                     if event.get("error"):
                         # 流内错误事件：上游用 200 流告诉你它坏了，绝不能静默跳过
                         err = event["error"]
+                        detail = sanitize_error_text(str(err.get("message", "")), 120)
                         raise ProviderServerError(
-                            self.name,
-                            f"流内错误 {err.get('code', '?')}: {str(err.get('message', ''))[:120]}",
+                            self.name, f"流内错误 {err.get('code', '?')}: {detail}"
                         )
                     if event.get("usage"):
                         u = event["usage"]
