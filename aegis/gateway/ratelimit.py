@@ -31,7 +31,8 @@ if tokens == nil then
   ts = now
 end
 
-tokens = math.min(capacity, tokens + (now - ts) * rate)   -- 按流逝时间补给，封顶
+local elapsed = math.max(0, now - ts)   -- Redis 主机时钟被 NTP 回拨时不做负补给
+tokens = math.min(capacity, tokens + elapsed * rate)   -- 按流逝时间补给，封顶
 
 local allowed = 0
 local wait = 0
@@ -43,7 +44,8 @@ else
 end
 
 redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', now)
-redis.call('EXPIRE', KEYS[1], math.ceil(capacity / rate) + 60)  -- 闲置桶自动回收
+-- 闲置桶自动回收；min 封顶防 rate 误配成极小值时 TTL 溢出 EXPIRE 参数范围
+redis.call('EXPIRE', KEYS[1], math.min(math.ceil(capacity / rate) + 60, 86400))
 return {allowed, tostring(wait)}
 """
 

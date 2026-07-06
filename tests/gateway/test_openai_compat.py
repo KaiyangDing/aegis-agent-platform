@@ -7,6 +7,7 @@ import respx
 from aegis.gateway.errors import (
     AuthError,
     BadRequestError,
+    GatewayOverloadedError,
     ProviderServerError,
     ProviderTimeoutError,
     RateLimitedError,
@@ -334,3 +335,63 @@ async def test_text_then_tool_calls_respect_chunk_order_invariant():
         "UsageChunk",
         "StopChunk",
     ]
+
+
+# ---------- 审计加固 A ----------
+
+
+@respx.mock
+async def test_retry_after_http_date_maps_to_seconds():
+    respx.post(URL).mock(
+        return_value=httpx.Response(
+            429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, text="busy"
+        )
+    )
+    with pytest.raises(RateLimitedError) as ei:
+        await collect(make_provider(), make_req())
+    # HTTP-date 被换算成秒数（过去的日期钳位为 0），绝不允许 ValueError 裸穿三层防线
+    assert ei.value.retry_after is not None
+    assert ei.value.retry_after >= 0.0
+
+
+@respx.mock
+async def test_retry_after_garbage_degrades_to_none():
+    respx.post(URL).mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "soon-ish"}, text="busy")
+    )
+    with pytest.raises(RateLimitedError) as ei:
+        await collect(make_provider(), make_req())
+    assert ei.value.retry_after is None  # 解析不了就退化为指数退避，不炸
+
+
+@respx.mock
+async def test_pool_timeout_is_local_overload_not_provider_fault():
+    respx.post(URL).mock(side_effect=httpx.PoolTimeout("pool exhausted"))
+    with pytest.raises(GatewayOverloadedError):
+        await collect(make_provider(), make_req())
+
+
+@respx.mock
+async def test_in_stream_error_event_raises():
+    body = sse({"error": {"code": "internal_error", "message": "server exploded"}})
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    with pytest.raises(ProviderServerError):
+        await collect(make_provider(), make_req())
+
+
+@respx.mock
+async def test_stream_without_done_sentinel_is_truncation():
+    body = sse(text_event("半截"))  # 干净断连：没有 [DONE]
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    got = []
+    with pytest.raises(ProviderServerError):
+        async for c in make_provider().complete(make_req(), model="qwen-flash"):
+            got.append(c)
+    assert got == [TextDelta(text="半截")]  # 已流出的不收回，但绝不合成完整收尾
+
+
+@respx.mock
+async def test_empty_200_body_is_truncation_not_success():
+    respx.post(URL).mock(return_value=httpx.Response(200, content=b"", headers=SSE_HEADERS))
+    with pytest.raises(ProviderServerError):
+        await collect(make_provider(), make_req())

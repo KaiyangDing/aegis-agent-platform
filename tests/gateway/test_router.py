@@ -3,6 +3,7 @@ import pytest
 from aegis.gateway import resilience
 from aegis.gateway.errors import (
     GatewayExhausted,
+    GatewayOverloadedError,
     ProviderServerError,
     RateLimitedError,
 )
@@ -78,8 +79,8 @@ def no_backoff_sleep(monkeypatch):
     monkeypatch.setattr(resilience, "_sleep", nosleep)
 
 
-def make_req() -> LLMRequest:
-    return LLMRequest(tier="fast", tenant_id="t1", messages=[Message(role="user", content="x")])
+def make_req(tier: str = "fast") -> LLMRequest:
+    return LLMRequest(tier=tier, tenant_id="t1", messages=[Message(role="user", content="x")])
 
 
 def make_gw(
@@ -249,3 +250,72 @@ async def test_midstream_failure_is_never_cached():
         async for _ in gw.complete(make_req()):
             pass
     assert cache.puts == []  # 事故绝不能变成可重放的事故
+
+
+# ---------- 审计加固 A ----------
+
+
+class ExplodingCache:
+    """在指定操作上抛连接错误——模拟 Redis 抖动时缓存必须退化而非拖死主链路。"""
+
+    def __init__(self, explode_on: str):
+        self.explode_on = explode_on
+        self.puts: list[list] = []
+
+    async def get(self, req):
+        if self.explode_on == "get":
+            raise ConnectionError("redis down")
+        return None
+
+    async def put(self, req, chunks):
+        if self.explode_on == "put":
+            raise ConnectionError("redis down")
+        self.puts.append(list(chunks))
+
+
+async def test_cache_get_failure_degrades_to_miss():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw([p1], cache=ExplodingCache("get"))
+    assert await collect(gw) == OK_CHUNKS  # 请求毫发无损，只是没省到钱
+    assert p1.calls == 1
+
+
+async def test_cache_put_failure_does_not_fail_completed_request():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw([p1], cache=ExplodingCache("put"))
+    # 已经成功的请求绝不能因为"写缓存失败"以异常收尾
+    assert await collect(gw) == OK_CHUNKS
+
+
+async def test_local_overload_neither_counted_nor_rerouted():
+    p1 = FakeProvider("p1", [GatewayOverloadedError("本地连接池排队超时")])
+    p2 = FakeProvider("p2", [OK_CHUNKS])
+    gw, breaker, _ = make_gw([p1, p2])
+    with pytest.raises(GatewayOverloadedError):
+        await collect(gw)
+    assert breaker.failures == []  # 本地过载不给供应商记熔断账
+    assert p2.calls == 0  # 也不换路——所有候选共用同一个连接池
+
+
+async def test_unrouted_tier_fails_cleanly_without_consuming_quota():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, limiter = make_gw([p1])  # 路由表里只有 fast
+    with pytest.raises(GatewayExhausted):
+        async for _ in gw.complete(make_req(tier="strong")):
+            pass
+    assert limiter.asked == []  # 配置问题在消耗任何配额之前干净失败
+
+
+def test_parse_routes_requires_all_three_tiers():
+    with pytest.raises(ValueError, match="缺少档位"):
+        parse_routes({"fast": ["bailian:qwen-flash"]}, {"bailian"})
+
+
+def test_parse_routes_rejects_empty_chain():
+    full = {
+        "fast": ["bailian:a"],
+        "standard": [],
+        "strong": ["bailian:b"],
+    }
+    with pytest.raises(ValueError, match="候选链为空"):
+        parse_routes(full, {"bailian"})

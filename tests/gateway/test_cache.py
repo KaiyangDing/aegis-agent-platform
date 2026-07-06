@@ -43,7 +43,7 @@ def test_key_ignores_volatile_ids():
 def test_key_has_tenant_prefix_and_isolates_tenants():
     probe = KeyProbe()
     k1, k2 = probe.key(req(tenant="tA")), probe.key(req(tenant="tB"))
-    assert k1.startswith("aegis:cache:tA:")
+    assert k1.startswith("aegis:cache:v1:tA:")  # v1 = chunk schema 版本，升级即全体 miss
     assert k1.split(":")[-1] != k2.split(":")[-1] or k1 != k2  # 前缀已隔离
 
 
@@ -75,3 +75,14 @@ async def test_incomplete_stream_never_stored(r):
     cache = ExactCache(r, ttl_seconds=60)
     await cache.put(req(content="半截"), CHUNKS[:2])  # 没有 Stop 收尾
     assert await cache.get(req(content="半截")) is None
+
+
+async def test_stream_without_substance_never_stored(r):
+    # 审计加固 A：只有 Usage+Stop 的"空洞流"（如被合成尾块骗过的截断）也不许入库
+    cache = ExactCache(r, ttl_seconds=60)
+    tail_only = [
+        UsageChunk(model="m", prompt_tokens=1, completion_tokens=0),
+        StopChunk(reason="end_turn"),
+    ]
+    await cache.put(req(content="空洞流"), tail_only)
+    assert await cache.get(req(content="空洞流")) is None

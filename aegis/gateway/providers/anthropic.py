@@ -13,6 +13,7 @@ import httpx
 from aegis.gateway.errors import (
     AuthError,
     BadRequestError,
+    GatewayOverloadedError,
     ProviderServerError,
     ProviderTimeoutError,
 )
@@ -60,6 +61,7 @@ class AnthropicProvider:
         output_tokens = 0
         stop_reason: Literal["end_turn", "tool_calls", "max_tokens"] = "end_turn"
         pending: dict[int, dict[str, Any]] = {}
+        saw_stop = False  # 终止哨兵见证（与 openai_compat 的 saw_done 同款防线）
         try:
             async with self._client.stream(
                 "POST",
@@ -113,6 +115,7 @@ class AnthropicProvider:
                             "output_tokens", output_tokens
                         )
                     elif etype == "message_stop":
+                        saw_stop = True
                         break
                     elif etype == "error":
                         err = event.get("error") or {}
@@ -121,10 +124,15 @@ class AnthropicProvider:
                             f"流内错误 {err.get('type')}: {str(err.get('message', ''))[:120]}",
                         )
                     # ping 等其余事件类型：无视
+        except httpx.PoolTimeout as e:
+            raise GatewayOverloadedError(f"[{self.name}] 本地连接池排队超时: {e!r}") from e
         except httpx.TimeoutException as e:
             raise ProviderTimeoutError(self.name, f"超时: {e!r}") from e
         except httpx.TransportError as e:
             raise ProviderServerError(self.name, f"连接失败: {e!r}") from e
+
+        if not saw_stop:
+            raise ProviderServerError(self.name, "流被截断：未收到 message_stop 终止哨兵")
 
         for idx in sorted(pending):
             slot = pending[idx]

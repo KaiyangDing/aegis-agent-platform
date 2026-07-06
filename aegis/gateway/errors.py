@@ -41,6 +41,14 @@ class AuthError(ProviderError):
     """401/403 —— 该修配置，不该重试。"""
 
 
+class GatewayOverloadedError(GatewayError):
+    """本地连接池排队超时——是我们自己过载，不是上游故障。
+
+    三个"不"（审计加固 A）：不记熔断账（供应商无辜）、不重试（重试加剧池争抢）、
+    不换路（所有候选共用同一个连接池，换了也白换）。
+    """
+
+
 class GatewayExhausted(GatewayError):
     """重试与 fallback 全部用尽。L2 只会见到它和 BudgetExceeded（契约 03 §7）。"""
 

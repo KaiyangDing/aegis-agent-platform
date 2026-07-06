@@ -11,10 +11,11 @@
 Auth/BadRequest 换路不记账（本家配置/转换问题，如历史转 Anthropic 失败）。
 """
 
+import logging
 import random
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, get_args
 
 from aegis.gateway.errors import (
     AuthError,
@@ -26,7 +27,9 @@ from aegis.gateway.errors import (
 )
 from aegis.gateway.providers.base import Provider
 from aegis.gateway.resilience import RetryPolicy, complete_with_retry
-from aegis.gateway.schema import LLMChunk, LLMRequest, UsageChunk
+from aegis.gateway.schema import LLMChunk, LLMRequest, Tier, UsageChunk
+
+logger = logging.getLogger(__name__)
 
 _PROBE_POLICY = RetryPolicy(max_attempts=1)  # 探针一次定胜负，别拿重试预算拖长半开期
 _BREAKER_COUNTED = (ProviderServerError, ProviderTimeoutError)
@@ -69,7 +72,14 @@ def parse_routes(
             if not sep or not model or provider not in known_providers:
                 raise ValueError(f"路由配置非法: {tier} -> {entry!r}")
             cands.append(Candidate(provider, model))
+        if not cands:
+            raise ValueError(f"档位 {tier} 的候选链为空")
         routes[tier] = cands
+    # 齐档校验：MODEL_ROUTES 被环境变量整体覆盖时最容易漏档——启动即炸，
+    # 别让第一个 strong 请求在凌晨三点用 KeyError 告诉你（以 schema.Tier 为单一事实源）
+    missing = set(get_args(Tier)) - routes.keys()
+    if missing:
+        raise ValueError(f"路由配置缺少档位: {sorted(missing)}（fast/standard/strong 必须齐全）")
     return routes
 
 
@@ -126,9 +136,20 @@ class LLMGateway:
         self._fault_targets = fault_targets
 
     async def complete(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        # 最外圈：缓存命中 = 零上游成本，不该消耗任何配额、不该问任何闸门
+        # 配置防御：parse_routes 已保证齐档，但手工构造的路由表（如测试）可能缺档——
+        # 在消耗任何配额之前干净地失败
+        candidates = self._routes.get(req.tier)
+        if not candidates:
+            raise GatewayExhausted(f"档位 {req.tier} 没有配置任何候选（检查 MODEL_ROUTES）")
+
+        # 最外圈：缓存命中 = 零上游成本，不该消耗任何配额、不该问任何闸门。
+        # 缓存的任何故障（连接失败/脏数据）都退化为 miss——缓存永远不许拖死主链路
         if self._cache is not None:
-            hit = await self._cache.get(req)
+            hit: list[LLMChunk] | None = None
+            try:
+                hit = await self._cache.get(req)
+            except Exception:
+                logger.warning("缓存读取失败，按 miss 处理", exc_info=True)
             if hit is not None:
                 for chunk in hit:
                     if isinstance(chunk, UsageChunk):
@@ -147,7 +168,7 @@ class LLMGateway:
             raise RateLimitedError("tenant-quota", f"租户 {req.tenant_id} 出站配额耗尽")
 
         last_error: Exception | None = None
-        for cand in self._routes[req.tier]:
+        for cand in candidates:
             provider = self._providers[cand.provider]
 
             decision = await self._breaker.allow(cand.provider)
@@ -178,7 +199,11 @@ class LLMGateway:
                     yield chunk
                 await self._breaker.on_success(cand.provider)
                 if self._cache is not None:
-                    await self._cache.put(req, buffer)  # 只有完整走完才会执行到这
+                    try:
+                        await self._cache.put(req, buffer)  # 只有完整走完才会执行到这
+                    except Exception:
+                        # 写缓存失败只是少省一次钱——绝不能让已经成功的请求以失败收尾
+                        logger.warning("缓存写入失败，跳过", exc_info=True)
                 return
             except _BREAKER_COUNTED as e:
                 await self._breaker.on_failure(cand.provider)

@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from aegis.core.config import Settings, get_settings
 
 
@@ -24,3 +27,9 @@ def test_secret_never_leaks_in_repr(monkeypatch):
 
 def test_get_settings_is_singleton():
     assert get_settings() is get_settings()
+
+
+def test_rate_limits_must_be_positive():
+    # 审计加固 A：速率写成 0 会让 Lua 的 capacity/rate 溢出——环境变量写错要在启动时炸
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, provider_rate=0)

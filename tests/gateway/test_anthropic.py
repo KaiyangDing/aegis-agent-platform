@@ -252,3 +252,17 @@ async def test_401_maps_to_auth_error():
 async def test_empty_api_key_fails_fast():
     with pytest.raises(AuthError):
         await collect(make_provider(api_key=""), make_req())
+
+
+# ---------- 审计加固 A ----------
+
+
+@respx.mock
+async def test_stream_without_message_stop_is_truncation():
+    body = sse(MSG_START, text_delta("半"))  # 干净断连：没有 message_stop
+    respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
+    got = []
+    with pytest.raises(ProviderServerError):
+        async for c in make_provider().complete(make_req(), model="claude-sonnet-4"):
+            got.append(c)
+    assert got == [TextDelta(text="半")]
