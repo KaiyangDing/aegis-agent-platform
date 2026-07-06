@@ -107,3 +107,18 @@ async def test_release_probe_frees_token_immediately(r):
     assert await b.allow(p) == "probe"
     await b.release_probe(p)  # 探针没打出去（如被限流拦下）→ 主动归还
     assert await b.allow(p) == "probe"  # 立刻可再领，不用干等 probe_ttl
+
+
+# ---------- M1.12a Redis 降级 ----------
+
+
+async def test_degraded_breaker_fails_open_then_counts_locally(dead_r):
+    b, p = CircuitBreaker(dead_r, failure_threshold=2, open_seconds=1), name()
+    assert await b.allow(p) == "allow"  # fail-open 基调：Redis 挂≠上游挂
+    await b.on_failure(p)
+    await b.on_failure(p)
+    assert await b.allow(p) == "deny"  # 但单机自保仍在：本地计数到阈值照样熔断
+    await asyncio.sleep(1.1)
+    assert await b.allow(p) == "probe"  # 本地版半开
+    await b.on_success(p)
+    assert await b.allow(p) == "allow"  # 成功清账，彻底闭合

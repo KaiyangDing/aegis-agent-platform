@@ -12,11 +12,24 @@ Auth/BadRequest 是我们自己的问题，供应商无辜。
 探测互斥靠 SET NX。需要 Lua 的读-改-写捆绑在限流器（M1.8）。
 """
 
+import logging
+import time
+from dataclasses import dataclass, field
 from typing import Literal
 
 import redis.asyncio as aioredis
 
+logger = logging.getLogger(__name__)
+
 Decision = Literal["allow", "probe", "deny"]
+
+
+@dataclass
+class _LocalState:
+    """降级形态的单机记忆：失去 Redis 集体记忆后各副本各自为政（自保而非全集群一致）。"""
+
+    fails: int = 0
+    open_until: float = field(default=0.0)
 
 
 class CircuitBreaker:
@@ -34,12 +47,14 @@ class CircuitBreaker:
         self._open_seconds = open_seconds
         self._probe_ttl = probe_ttl
         self._fail_window = fail_window
+        self._local: dict[str, _LocalState] = {}
+        self._degraded = False
 
     def _keys(self, provider: str) -> tuple[str, str, str]:
         base = f"aegis:cb:{provider}"
         return f"{base}:open", f"{base}:fails", f"{base}:probe"
 
-    async def allow(self, provider: str) -> Decision:
+    async def _allow_redis(self, provider: str) -> Decision:
         """请求放行判定：allow=正常 / probe=你是唯一探针 / deny=快速拒绝。"""
         open_key, fails_key, probe_key = self._keys(provider)
         if await self._r.exists(open_key):
@@ -51,23 +66,70 @@ class CircuitBreaker:
         won = await self._r.set(probe_key, "1", nx=True, ex=self._probe_ttl)
         return "probe" if won else "deny"
 
-    async def on_success(self, provider: str) -> None:
-        """成功 = 彻底闭合：三把 key 一并清掉。"""
-        await self._r.delete(*self._keys(provider))
+    async def allow(self, provider: str) -> Decision:
+        try:
+            decision = await self._allow_redis(provider)
+        except Exception:
+            self._note_degraded()
+            return self._local_allow(provider)
+        if self._degraded:
+            logger.warning("Redis 熔断状态恢复，切回集体记忆")
+            self._degraded = False
+        return decision
 
-    async def release_probe(self, provider: str) -> None:
-        """归还未获裁决的探测令牌——探针没打出去（被限流拦下）或结果不构成
-        熔断裁决（429/Auth 类失败）时调用，否则令牌滞留 probe_ttl 秒拖慢恢复。
+    def _note_degraded(self) -> None:
+        if not self._degraded:
+            logger.warning(
+                "Redis 熔断状态不可用，降级为本地计数（fail-open 基调；"
+                "'全集群唯一探针'等承诺在降级期间失效）",
+                exc_info=True,
+            )
+            self._degraded = True
 
-        无 owner-token 校验（已知取舍）：极端时序下可能误删其他副本刚领的
-        新令牌，代价只是多放一个探针、可自愈；owner CAD 在此属过度设计。
-        """
-        await self._r.delete(self._keys(provider)[2])
+    def _local_allow(self, provider: str) -> Decision:
+        st = self._local.setdefault(provider, _LocalState())
+        now = time.monotonic()
+        if st.open_until > now:
+            return "deny"
+        if st.fails >= self._threshold:
+            st.fails = 0  # 视作半开放行一次；再失败会立刻重新攒满
+            return "probe"
+        return "allow"
 
-    async def on_failure(self, provider: str) -> None:
+    async def _on_failure_redis(self, provider: str) -> None:
         open_key, fails_key, probe_key = self._keys(provider)
         fails = await self._r.incr(fails_key)
         await self._r.expire(fails_key, self._fail_window)
         if fails >= self._threshold:
             await self._r.set(open_key, "1", ex=self._open_seconds)
             await self._r.delete(probe_key)  # 探测失败的场景：令牌作废，重新计时
+
+    async def on_success(self, provider: str) -> None:
+        """成功 = 彻底闭合：三把 key 一并清掉。"""
+        self._local.pop(provider, None)
+        try:
+            await self._r.delete(*self._keys(provider))
+        except Exception:
+            self._note_degraded()
+
+    async def on_failure(self, provider: str) -> None:
+        st = self._local.setdefault(provider, _LocalState())
+        st.fails += 1
+        if st.fails >= self._threshold:
+            st.open_until = time.monotonic() + self._open_seconds
+        try:
+            await self._on_failure_redis(provider)
+        except Exception:
+            self._note_degraded()
+
+    async def release_probe(self, provider: str) -> None:
+        """归还未获裁决的探测令牌——探针没打出去或结果不构成裁决时调用。
+
+        无 owner-token 校验（已知取舍）：极端时序下可能误删其他副本刚领的
+        新令牌，代价只是多放一个探针、可自愈；owner CAD 在此属过度设计。
+        本地降级形态无令牌概念，仅 Redis 路径需要归还。
+        """
+        try:
+            await self._r.delete(self._keys(provider)[2])
+        except Exception:
+            self._note_degraded()

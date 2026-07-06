@@ -23,6 +23,19 @@ async def r():
     await client.aclose()
 
 
+@pytest.fixture
+async def dead_r():
+    """指向无人监听端口的客户端：模拟 Redis 整体不可用（超时调到最小，测试不拖沓）。"""
+    client = aioredis.from_url(
+        "redis://localhost:6399/0",
+        socket_connect_timeout=0.1,
+        socket_timeout=0.1,
+        decode_responses=True,
+    )
+    yield client
+    await client.aclose()
+
+
 TEST_DATABASE_URL = os.environ.get(
     "AEGIS_TEST_DATABASE_URL", "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis"
 )

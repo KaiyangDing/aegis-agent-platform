@@ -66,3 +66,18 @@ async def test_wait_take_gives_up_beyond_budget(r):
     rl, s = RateLimiter(r), scope()
     await rl.try_take(s, rate=0.1, capacity=1)  # 下一个令牌要 10 秒后
     assert not await rl.wait_take(s, rate=0.1, capacity=1, max_wait=0.2)  # 预算不够，果断放弃
+
+
+# ---------- M1.12a Redis 降级 ----------
+
+
+async def test_degraded_local_bucket_still_enforces(dead_r):
+    rl, s = RateLimiter(dead_r, replicas=1), scope()
+    results = [await rl.try_take(s, rate=1, capacity=5) for _ in range(6)]
+    assert [ok for ok, _ in results] == [True] * 5 + [False]  # 降级了，但限流语义还在
+
+
+async def test_degraded_quota_divided_by_replicas(dead_r):
+    rl, s = RateLimiter(dead_r, replicas=2), scope()  # 两副本：本地只拿全局的一半
+    results = [await rl.try_take(s, rate=1, capacity=4) for _ in range(3)]
+    assert [ok for ok, _ in results] == [True, True, False]  # capacity 4/2=2

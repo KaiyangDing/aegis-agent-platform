@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     tenant_rate: float = Field(default=5.0, gt=0)  # 每租户出站 QPS
     tenant_burst: float = Field(default=10.0, gt=0)
     limiter_max_wait: float = 10.0  # 限流排队预算
+    replica_count: int = Field(default=1, ge=1)  # 部署副本数：Redis 降级时本地配额=全局/副本数
     cache_ttl_seconds: int = 300  # 精确缓存 TTL；0 = 关闭缓存
     # 模型单价（元/千 token，[输入, 输出]）——演示值，以百炼价目页为准；调价改这里不改代码
     model_prices: dict[str, list[float]] = {

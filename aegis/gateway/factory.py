@@ -30,7 +30,7 @@ def build_gateway() -> LLMGateway:
         providers=providers,
         routes=parse_routes(s.model_routes, set(providers)),
         breaker=CircuitBreaker(redis),
-        limiter=RateLimiter(redis),
+        limiter=RateLimiter(redis, replicas=s.replica_count),
         cache=ExactCache(redis, ttl_seconds=s.cache_ttl_seconds)
         if s.cache_ttl_seconds > 0
         else None,

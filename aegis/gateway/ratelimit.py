@@ -9,11 +9,24 @@ Lua 脚本在 Redis 单线程内整体执行，等于一条自定义的原子命
 """
 
 import asyncio
+import logging
 import time
+from dataclasses import dataclass
 
 import redis.asyncio as aioredis
 
+logger = logging.getLogger(__name__)
+
 _sleep = asyncio.sleep  # 测试接缝，与 resilience 同款
+
+
+@dataclass
+class _LocalBucket:
+    """降级形态的桶：Lua 脚本里那套算法的 Python 直译（对照着读）。"""
+
+    tokens: float
+    ts: float
+
 
 _TOKEN_BUCKET_LUA = """
 local rate = tonumber(ARGV[1])
@@ -51,18 +64,49 @@ return {allowed, tostring(wait)}
 
 
 class RateLimiter:
-    def __init__(self, redis: aioredis.Redis):
+    def __init__(self, redis: aioredis.Redis, *, replicas: int = 1):
         self._r = redis
-        # register_script：redis-py 先发 EVALSHA（按脚本哈希调缓存），
-        # 未缓存时自动降级 EVAL 上传——脚本只传输一次，之后只传哈希
         self._take = redis.register_script(_TOKEN_BUCKET_LUA)
+        self._replicas = max(1, replicas)
+        self._local: dict[str, _LocalBucket] = {}
+        self._degraded = False
 
     async def try_take(
         self, scope: str, rate: float, capacity: float, cost: float = 1.0
     ) -> tuple[bool, float]:
-        """立即尝试取令牌。返回 (是否拿到, 拿不到时建议等待的秒数)。"""
-        allowed, wait = await self._take(keys=[f"aegis:rl:{scope}"], args=[rate, capacity, cost])
+        """立即尝试取令牌。Redis 不可用时降级为进程内桶（配额=全局/副本数）。"""
+        try:
+            allowed, wait = await self._take(
+                keys=[f"aegis:rl:{scope}"], args=[rate, capacity, cost]
+            )
+        except Exception:
+            if not self._degraded:
+                logger.warning(
+                    "Redis 限流不可用，降级为进程内令牌桶（本地配额=全局/%d）",
+                    self._replicas,
+                    exc_info=True,
+                )
+                self._degraded = True
+            return self._local_take(scope, rate / self._replicas, capacity / self._replicas, cost)
+        if self._degraded:
+            logger.warning("Redis 限流恢复，切回共享令牌桶")
+            self._degraded = False
         return bool(int(allowed)), float(wait)
+
+    def _local_take(
+        self, scope: str, rate: float, capacity: float, cost: float = 1.0
+    ) -> tuple[bool, float]:
+        now = time.monotonic()
+        bucket = self._local.get(scope)
+        if bucket is None:
+            bucket = _LocalBucket(tokens=capacity, ts=now)
+            self._local[scope] = bucket
+        bucket.tokens = min(capacity, bucket.tokens + (now - bucket.ts) * rate)
+        bucket.ts = now
+        if bucket.tokens >= cost:
+            bucket.tokens -= cost
+            return True, 0.0
+        return False, (cost - bucket.tokens) / rate if rate > 0 else 60.0
 
     async def wait_take(
         self,
