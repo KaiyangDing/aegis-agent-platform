@@ -17,5 +17,7 @@ async def r():
         if os.environ.get("CI"):
             raise  # CI 里 Redis 必须在——静默跳过等于守卫失效
         pytest.skip("本地 Redis 未启动：docker compose -f deploy/docker-compose.yml up -d")
+    # db9 是专用测试库：开跑前清空，防止跨分支/跨 worktree 的确定性 key 读到旧值
+    await client.flushdb()
     yield client
     await client.aclose()

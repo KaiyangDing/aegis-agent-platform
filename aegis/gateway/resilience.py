@@ -12,7 +12,8 @@
 import asyncio
 import random
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from dataclasses import dataclass
 
 from aegis.gateway.errors import (
@@ -51,7 +52,7 @@ async def complete_with_retry(
     req: LLMRequest,
     model: str,
     policy: RetryPolicy | None = None,
-) -> AsyncIterator[LLMChunk]:
+) -> AsyncGenerator[LLMChunk]:
     policy = policy or RetryPolicy()
     start = time.monotonic()  # 单调钟：测时长不用壁钟（壁钟会被校时跳变）
     attempt = 0
@@ -70,8 +71,11 @@ async def complete_with_retry(
                 raise
             await _sleep(delay)
             continue
-        # 首块已到手：从此进入"不可重试区"，任何错误原样上抛
-        yield first
-        async for chunk in stream:
-            yield chunk
+        # 首块已到手：从此进入"不可重试区"，任何错误原样上抛。
+        # aclosing：消费者提前挂断时 GeneratorExit 同步传进 provider 生成器，
+        # httpx 流式连接立刻归还池子，不等 GC 终结器（审计加固 C）
+        async with aclosing(stream) as inner:
+            yield first
+            async for chunk in inner:
+                yield chunk
         return

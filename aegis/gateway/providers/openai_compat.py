@@ -10,7 +10,7 @@ M1.3 起为真流式（SSE）；M1.4 起支持 tool-call 双向映射（增量�
 """
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
 import httpx
@@ -53,7 +53,7 @@ class OpenAICompatProvider:
         self._api_key = api_key
         self._client = client or shared_client()
 
-    async def complete(self, req: LLMRequest, model: str) -> AsyncIterator[LLMChunk]:
+    async def complete(self, req: LLMRequest, model: str) -> AsyncGenerator[LLMChunk]:
         if not self._api_key:
             raise AuthError(self.name, "API key 未配置（检查 .env 的 DASHSCOPE_API_KEY）")
         payload = self._build_payload(req, model)

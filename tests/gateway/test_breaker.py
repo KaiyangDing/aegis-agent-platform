@@ -10,8 +10,11 @@ def name() -> str:
     return f"prov-{uuid.uuid4().hex[:8]}"  # 每个测试独立命名空间，互不污染
 
 
-def make_breaker(r: aioredis.Redis) -> CircuitBreaker:
-    return CircuitBreaker(r, failure_threshold=3, open_seconds=1, probe_ttl=5)
+def make_breaker(r: aioredis.Redis, **kw) -> CircuitBreaker:
+    kw.setdefault("failure_threshold", 3)
+    kw.setdefault("open_seconds", 1)
+    kw.setdefault("probe_ttl", 5)
+    return CircuitBreaker(r, **kw)
 
 
 async def test_closed_allows_by_default(r):
@@ -78,3 +81,29 @@ async def test_providers_are_independent(r):
         await b.on_failure(p1)
     assert await b.allow(p1) == "deny"
     assert await b.allow(p2) == "allow"  # 百炼挂了不该连累 Anthropic
+
+
+# ---------- 审计加固 C ----------
+
+
+async def test_probe_token_ttl_guarantees_self_healing(r):
+    # SET NX 的 ex= 参数是"探针进程崩溃后系统自愈"的唯一保障——钉死它
+    b, p = make_breaker(r, probe_ttl=1), name()
+    for _ in range(3):
+        await b.on_failure(p)
+    await asyncio.sleep(1.1)  # open 过期 → 半开
+    assert await b.allow(p) == "probe"
+    ttl = await r.ttl(f"aegis:cb:{p}:probe")
+    assert 0 < ttl <= 1  # ex 被正确设置
+    await asyncio.sleep(1.1)  # 模拟探针进程崩溃：无人裁决，令牌自然过期
+    assert await b.allow(p) == "probe"  # 系统放出下一个探针，而不是永久 deny
+
+
+async def test_release_probe_frees_token_immediately(r):
+    b, p = make_breaker(r), name()
+    for _ in range(3):
+        await b.on_failure(p)
+    await asyncio.sleep(1.1)
+    assert await b.allow(p) == "probe"
+    await b.release_probe(p)  # 探针没打出去（如被限流拦下）→ 主动归还
+    assert await b.allow(p) == "probe"  # 立刻可再领，不用干等 probe_ttl

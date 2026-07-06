@@ -13,7 +13,8 @@ Auth/BadRequest 换路不记账（本家配置/转换问题，如历史转 Anthr
 
 import logging
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Protocol, get_args
 
@@ -43,6 +44,7 @@ class BreakerLike(Protocol):
     async def allow(self, provider: str) -> str: ...
     async def on_success(self, provider: str) -> None: ...
     async def on_failure(self, provider: str) -> None: ...
+    async def release_probe(self, provider: str) -> None: ...
 
 
 class LimiterLike(Protocol):
@@ -106,11 +108,12 @@ class FaultInjector:
         self._rate = rate
         self.name = inner.name
 
-    async def complete(self, req: LLMRequest, model: str) -> AsyncIterator[LLMChunk]:
+    async def complete(self, req: LLMRequest, model: str) -> AsyncGenerator[LLMChunk]:
         if _random() < self._rate:
             raise ProviderServerError(self.name, "故障注入（fault_injection_rate）")
-        async for chunk in self._inner.complete(req, model):
-            yield chunk
+        async with aclosing(self._inner.complete(req, model)) as inner:
+            async for chunk in inner:
+                yield chunk
 
 
 class LLMGateway:
@@ -137,7 +140,7 @@ class LLMGateway:
         self._fault_rate = fault_rate
         self._fault_targets = fault_targets
 
-    async def complete(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
+    async def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
         # 配置防御：parse_routes 已保证齐档，但手工构造的路由表（如测试）可能缺档——
         # 在消耗任何配额之前干净地失败
         candidates = self._routes.get(req.tier)
@@ -185,6 +188,9 @@ class LLMGateway:
                 max_wait=self._limits.max_wait,
             )
             if not ok:
+                if decision == "probe":
+                    # 领了全集群唯一的探测令牌却没打出去——必须归还，否则半开期空转
+                    await self._breaker.release_probe(cand.provider)
                 continue  # 这家连排队都排不上，换下一站
 
             target: Provider = provider
@@ -195,11 +201,13 @@ class LLMGateway:
             yielded = False
             buffer: list[LLMChunk] = []
             try:
-                async for chunk in complete_with_retry(target, req, cand.model, policy):
-                    yielded = True
-                    if self._cache is not None:
-                        buffer.append(chunk)
-                    yield chunk
+                # aclosing：消费者提前挂断时，关闭信号同步穿透 重试壳→适配器→httpx
+                async with aclosing(complete_with_retry(target, req, cand.model, policy)) as rs:
+                    async for chunk in rs:
+                        yielded = True
+                        if self._cache is not None:
+                            buffer.append(chunk)
+                        yield chunk
                 await self._breaker.on_success(cand.provider)
                 if self._cache is not None:
                     try:
@@ -216,10 +224,15 @@ class LLMGateway:
                     raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
                 last_error = e
             except RateLimitedError as e:
+                if decision == "probe":
+                    # 429 不构成熔断裁决——令牌归还，别让半开期干等 probe_ttl
+                    await self._breaker.release_probe(cand.provider)
                 if yielded:
                     raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
                 last_error = e  # 429 不记熔断账：上游活着，只是挤
             except (AuthError, BadRequestError) as e:
+                if decision == "probe":
+                    await self._breaker.release_probe(cand.provider)
                 if yielded:
                     raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
                 last_error = e  # 本家的配置/转换问题，别家未必过不去

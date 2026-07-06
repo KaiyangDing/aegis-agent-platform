@@ -27,9 +27,11 @@ class FakeProvider:
         self.name = name
         self.script = list(script)
         self.calls = 0
+        self.models: list[str] = []  # 记录每次被要求跑的模型——锁死 cand.model 的传递
 
     async def complete(self, req, model):
         self.calls += 1
+        self.models.append(model)
         item = self.script.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -53,6 +55,7 @@ class StubBreaker:
         self.decisions = decisions or {}
         self.successes: list[str] = []
         self.failures: list[str] = []
+        self.releases: list[str] = []
 
     async def allow(self, provider: str) -> str:
         return self.decisions.get(provider, "allow")
@@ -62,6 +65,9 @@ class StubBreaker:
 
     async def on_failure(self, provider: str) -> None:
         self.failures.append(provider)
+
+    async def release_probe(self, provider: str) -> None:
+        self.releases.append(provider)
 
 
 class StubLimiter:
@@ -115,9 +121,11 @@ async def test_first_candidate_success_short_circuits():
 
 async def test_breaker_deny_skips_provider_without_calling_it():
     p1, p2 = FakeProvider("p1", [OK_CHUNKS]), FakeProvider("p2", [OK_CHUNKS])
-    gw, _, _ = make_gw([p1, p2], breaker=StubBreaker({"p1": "deny"}))
+    gw, _, limiter = make_gw([p1, p2], breaker=StubBreaker({"p1": "deny"}))
     assert await collect(gw) == OK_CHUNKS
     assert (p1.calls, p2.calls) == (0, 1)  # p1 一次都没被打扰——秒拒的意义
+    # 断言强度（加固 C）：deny 的供应商连限流队都不该排——若限流被挪到熔断前，这里变红
+    assert "provider:p1" not in limiter.asked
 
 
 async def test_server_error_counts_to_breaker_then_falls_back():
@@ -127,6 +135,8 @@ async def test_server_error_counts_to_breaker_then_falls_back():
     assert await collect(gw) == OK_CHUNKS
     assert breaker.failures == ["p1"]
     assert breaker.successes == ["p2"]
+    # 断言强度（加固 C）：fallback 站必须用自己的 model——若误绑链首 model，这里变红
+    assert p2.models == ["model-p2"]
 
 
 async def test_retry_happens_inside_candidate_before_fallback():
@@ -324,3 +334,54 @@ def test_parse_routes_rejects_empty_chain():
     }
     with pytest.raises(ValueError, match="候选链为空"):
         parse_routes(full, {"bailian"})
+
+
+async def test_probe_token_released_when_result_is_no_verdict():
+    # 探针半路吃了 429：不构成熔断裁决，令牌必须归还（否则半开期空转 probe_ttl 秒）
+    p1 = FakeProvider("p1", [RateLimitedError("p1", "busy")])
+    p2 = FakeProvider("p2", [OK_CHUNKS])
+    gw, breaker, _ = make_gw(
+        [p1, p2],
+        breaker=StubBreaker({"p1": "probe"}),
+        retry_policy=RetryPolicy(max_attempts=1),
+    )
+    assert await collect(gw) == OK_CHUNKS
+    assert breaker.releases == ["p1"]
+    assert breaker.failures == []
+
+
+async def test_probe_token_released_when_limiter_blocks_the_probe():
+    p1, p2 = FakeProvider("p1", [OK_CHUNKS]), FakeProvider("p2", [OK_CHUNKS])
+    gw, breaker, _ = make_gw(
+        [p1, p2],
+        breaker=StubBreaker({"p1": "probe"}),
+        limiter=StubLimiter(deny={"provider:p1"}),
+    )
+    assert await collect(gw) == OK_CHUNKS
+    assert p1.calls == 0
+    assert breaker.releases == ["p1"]  # 领了令牌没打出去 → 还回去
+
+
+class ClosingTrackedProvider:
+    """finally 记录关闭——验证消费者挂断时 GeneratorExit 同步穿透到最内层。"""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.closed = False
+
+    async def complete(self, req, model):
+        try:
+            yield TextDelta(text="a")
+            yield TextDelta(text="b")
+        finally:
+            self.closed = True
+
+
+async def test_consumer_close_propagates_to_provider_synchronously():
+    p = ClosingTrackedProvider("p1")
+    gw, _, _ = make_gw([p])
+    agen = gw.complete(make_req())
+    assert isinstance(await anext(agen), TextDelta)
+    await agen.aclose()  # 消费者提前挂断（SSE 客户端关页面的最小复现）
+    # 没有 aclosing 链时，内层生成器要等 GC 终结器异步收尸——此断言会红
+    assert p.closed

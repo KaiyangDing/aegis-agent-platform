@@ -26,7 +26,7 @@ class CircuitBreaker:
         *,
         failure_threshold: int = 5,
         open_seconds: int = 30,
-        probe_ttl: int = 30,
+        probe_ttl: int = 120,  # 必须 ≥ 读超时 90s：探针飞行中令牌过期会放出第二个并发探针
         fail_window: int = 120,
     ):
         self._r = redis
@@ -54,6 +54,15 @@ class CircuitBreaker:
     async def on_success(self, provider: str) -> None:
         """成功 = 彻底闭合：三把 key 一并清掉。"""
         await self._r.delete(*self._keys(provider))
+
+    async def release_probe(self, provider: str) -> None:
+        """归还未获裁决的探测令牌——探针没打出去（被限流拦下）或结果不构成
+        熔断裁决（429/Auth 类失败）时调用，否则令牌滞留 probe_ttl 秒拖慢恢复。
+
+        无 owner-token 校验（已知取舍）：极端时序下可能误删其他副本刚领的
+        新令牌，代价只是多放一个探针、可自愈；owner CAD 在此属过度设计。
+        """
+        await self._r.delete(self._keys(provider)[2])
 
     async def on_failure(self, provider: str) -> None:
         open_key, fails_key, probe_key = self._keys(provider)

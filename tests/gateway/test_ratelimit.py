@@ -24,23 +24,25 @@ async def test_denied_comes_with_wait_hint(r):
 
 
 async def test_tokens_refill_over_time(r):
+    # 时序参数放宽（审计加固 C）：rate=2 → "不该有令牌"的判定窗口 500ms，
+    # 共享 CI runner 的调度停顿不再能翻车（原 rate=10 只有 100ms 余量）
     rl, s = RateLimiter(r), scope()
     for _ in range(3):
-        await rl.try_take(s, rate=10, capacity=3)
-    ok, _ = await rl.try_take(s, rate=10, capacity=3)
+        await rl.try_take(s, rate=2, capacity=3)
+    ok, _ = await rl.try_take(s, rate=2, capacity=3)
     assert not ok
-    await asyncio.sleep(0.15)  # rate=10/s → 0.15s 补回约 1.5 个
-    ok, _ = await rl.try_take(s, rate=10, capacity=3)
+    await asyncio.sleep(0.8)  # rate=2/s → 补回约 1.6 个，上下都有余量
+    ok, _ = await rl.try_take(s, rate=2, capacity=3)
     assert ok
 
 
 async def test_refill_never_exceeds_capacity(r):
+    # 同上放宽：rate=2 时第三次取令牌的失败窗口为 500ms（原 rate=100 仅 10ms，必然偶发红）
     rl, s = RateLimiter(r), scope()
-    await rl.try_take(s, rate=100, capacity=2)  # 建桶
-    await asyncio.sleep(0.3)  # 理论补给 30 个，但桶只装 2 个
-    results = [await rl.try_take(s, rate=100, capacity=2) for _ in range(3)]
-    oks = [ok for ok, _ in results]
-    assert oks[0] and not all(oks)  # 有令牌可拿，但绝没有 3 个——封顶生效
+    await rl.try_take(s, rate=2, capacity=2)  # 建桶并取走 1 个
+    await asyncio.sleep(1.0)  # 理论补给 2 个，但桶封顶 2 个
+    results = [await rl.try_take(s, rate=2, capacity=2) for _ in range(3)]
+    assert [ok for ok, _ in results] == [True, True, False]  # 封顶生效，且断言更精确
 
 
 async def test_scopes_are_independent(r):

@@ -1,7 +1,7 @@
 """供应商适配器的公共契约与共享 HTTP 客户端。"""
 
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Protocol
@@ -23,7 +23,9 @@ class Provider(Protocol):
 
     name: str
 
-    def complete(self, req: LLMRequest, model: str) -> AsyncIterator[LLMChunk]: ...
+    # AsyncGenerator 而非 AsyncIterator：契约显式承诺 aclose()——上层的 aclosing
+    # 链式关闭（加固 C）依赖它。async def + yield 的实现天然满足
+    def complete(self, req: LLMRequest, model: str) -> AsyncGenerator[LLMChunk]: ...
 
 
 _client: httpx.AsyncClient | None = None
