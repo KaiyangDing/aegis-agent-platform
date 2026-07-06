@@ -25,7 +25,7 @@ jobs:
     steps:
       # action 钉到完整 commit SHA：tag 可被上游重指恶意提交，SHA 不可变（审计加固 B）
       - name: 检出代码
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: 安装 uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
