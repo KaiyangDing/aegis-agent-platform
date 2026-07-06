@@ -22,6 +22,19 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aegis
+          POSTGRES_PASSWORD: aegis
+          POSTGRES_DB: aegis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aegis -d aegis"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       # action 钉到完整 commit SHA：tag 可被上游重指恶意提交，SHA 不可变（审计加固 B）
       - name: 检出代码
@@ -43,6 +56,9 @@ jobs:
 
       - name: 架构分层检查（import-linter）
         run: uv run lint-imports
+
+      - name: 数据库迁移（alembic 在 CI 真实执行）
+        run: uv run alembic upgrade head
 
       - name: 测试（pytest）
         run: uv run pytest

@@ -21,3 +21,39 @@ async def r():
     await client.flushdb()
     yield client
     await client.aclose()
+
+
+TEST_DATABASE_URL = os.environ.get(
+    "AEGIS_TEST_DATABASE_URL", "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis"
+)
+
+
+@pytest.fixture
+async def db_session():
+    """事务回滚式 DB 夹具：测试里的一切写入在结束时整体回滚——不脏库、无需清理。
+
+    这是 SQLAlchemy 测试的标准姿势：连接上手动开事务、会话绑在这条连接上，
+    测试结束 rollback——比"测完删数据"可靠（断言失败也不留残渣）。
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    from aegis.core.db import Base
+
+    engine = create_async_engine(TEST_DATABASE_URL)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)  # 本地兜底；正式演进走 alembic
+    except Exception:
+        await engine.dispose()
+        if os.environ.get("CI"):
+            raise
+        pytest.skip("本地 PostgreSQL 未启动：docker compose -f deploy/docker-compose.yml up -d")
+    async with engine.connect() as conn:
+        trans = await conn.begin()
+        session = AsyncSession(bind=conn, expire_on_commit=False)
+        try:
+            yield session
+        finally:
+            await session.close()
+            await trans.rollback()  # 整个测试的写入一笔勾销
+    await engine.dispose()
