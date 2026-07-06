@@ -1,9 +1,13 @@
 """组装在边缘：真实依赖只在这里聚合成完整网关，其余代码一律靠注入。"""
 
+from decimal import Decimal
+
 from aegis.core.config import get_settings
+from aegis.core.db import get_session_factory
 from aegis.core.redis import get_redis
 from aegis.gateway.breaker import CircuitBreaker
 from aegis.gateway.cache import ExactCache
+from aegis.gateway.metering import MeteringRecorder
 from aegis.gateway.providers.anthropic import AnthropicProvider
 from aegis.gateway.providers.base import Provider
 from aegis.gateway.providers.openai_compat import OpenAICompatProvider
@@ -39,4 +43,9 @@ def build_gateway() -> LLMGateway:
         ),
         fault_rate=s.fault_injection_rate,
         fault_targets=frozenset(s.fault_injection_targets),
+        meter=MeteringRecorder(
+            get_session_factory(),
+            {m: (Decimal(str(p)), Decimal(str(c))) for m, (p, c) in s.model_prices.items()},
+        ),
+        monthly_token_budget=s.tenant_monthly_token_budget,
     )

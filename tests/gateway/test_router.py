@@ -2,6 +2,7 @@ import pytest
 
 from aegis.gateway import resilience
 from aegis.gateway.errors import (
+    BudgetExceeded,
     GatewayExhausted,
     GatewayOverloadedError,
     GatewayStreamInterrupted,
@@ -385,3 +386,61 @@ async def test_consumer_close_propagates_to_provider_synchronously():
     await agen.aclose()  # 消费者提前挂断（SSE 客户端关页面的最小复现）
     # 没有 aclosing 链时，内层生成器要等 GC 终结器异步收尸——此断言会红
     assert p.closed
+
+
+class StubMeter:
+    def __init__(self, spent: int = 0):
+        self.spent = spent
+        self.records: list[tuple[str, UsageChunk]] = []
+
+    async def record(self, req, provider, usage):
+        self.records.append((provider, usage))
+
+    async def month_spend(self, tenant_id) -> int:
+        return self.spent
+
+
+class ExplodingMeter(StubMeter):
+    async def record(self, req, provider, usage):
+        raise ConnectionError("ledger db down")
+
+    async def month_spend(self, tenant_id) -> int:
+        raise ConnectionError("ledger db down")
+
+
+async def test_success_records_usage_with_provider():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    meter = StubMeter()
+    gw, _, _ = make_gw([p1], meter=meter)
+    await collect(gw)
+    assert len(meter.records) == 1
+    provider, usage = meter.records[0]
+    assert provider == "p1"
+    assert usage.cached is False
+
+
+async def test_cache_hit_records_zero_cost_usage():
+    meter = StubMeter()
+    gw, _, _ = make_gw(
+        [FakeProvider("p1", [OK_CHUNKS])], cache=StubCache(hit=OK_CHUNKS), meter=meter
+    )
+    await collect(gw)
+    provider, usage = meter.records[0]
+    assert provider == "cache"
+    assert usage.cached is True  # 记了账，但盖着缓存章——compute_cost 会记 0 元
+
+
+async def test_budget_exceeded_blocks_before_everything():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, limiter = make_gw([p1], meter=StubMeter(spent=100), monthly_token_budget=100)
+    with pytest.raises(BudgetExceeded):
+        await collect(gw)
+    assert p1.calls == 0
+    assert limiter.asked == []  # 预算闸在租户限流之前——超支的请求一个令牌都不消耗
+
+
+async def test_meter_failures_never_break_request():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw([p1], meter=ExplodingMeter(), monthly_token_budget=100)
+    # month_spend 挂 → fail-open 放行；record 挂 → 只告警。请求全程无感
+    assert await collect(gw) == OK_CHUNKS

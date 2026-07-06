@@ -21,6 +21,7 @@ from typing import Protocol, get_args
 from aegis.gateway.errors import (
     AuthError,
     BadRequestError,
+    BudgetExceeded,
     GatewayExhausted,
     GatewayStreamInterrupted,
     ProviderServerError,
@@ -42,8 +43,11 @@ _random = random.random  # 测试接缝
 
 class BreakerLike(Protocol):
     async def allow(self, provider: str) -> str: ...
+
     async def on_success(self, provider: str) -> None: ...
+
     async def on_failure(self, provider: str) -> None: ...
+
     async def release_probe(self, provider: str) -> None: ...
 
 
@@ -55,7 +59,14 @@ class LimiterLike(Protocol):
 
 class CacheLike(Protocol):
     async def get(self, req: LLMRequest) -> list[LLMChunk] | None: ...
+
     async def put(self, req: LLMRequest, chunks: list[LLMChunk]) -> None: ...
+
+
+class MeterLike(Protocol):
+    async def record(self, req: LLMRequest, provider: str, usage: UsageChunk) -> None: ...
+
+    async def month_spend(self, tenant_id: str) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -125,6 +136,8 @@ class LLMGateway:
         breaker: BreakerLike,
         limiter: LimiterLike,
         cache: CacheLike | None = None,
+        meter: MeterLike | None = None,
+        monthly_token_budget: int = 0,
         limits: GatewayLimits | None = None,
         retry_policy: RetryPolicy | None = None,
         fault_rate: float = 0.0,
@@ -135,6 +148,8 @@ class LLMGateway:
         self._breaker = breaker
         self._limiter = limiter
         self._cache = cache
+        self._meter = meter
+        self._monthly_token_budget = monthly_token_budget
         self._limits = limits or GatewayLimits()
         self._retry_policy = retry_policy or RetryPolicy()
         self._fault_rate = fault_rate
@@ -156,11 +171,30 @@ class LLMGateway:
             except Exception:
                 logger.warning("缓存读取失败，按 miss 处理", exc_info=True)
             if hit is not None:
+                hit_usage: UsageChunk | None = None
                 for chunk in hit:
                     if isinstance(chunk, UsageChunk):
                         chunk = chunk.model_copy(update={"cached": True})  # 盖缓存章
+                        hit_usage = chunk
                     yield chunk
+                if hit_usage is not None:
+                    # 命中也记账（provider="cache"，成本 0）——命中率统计的分母在这
+                    await self._safe_record(req, "cache", hit_usage)
                 return
+
+        # 租户月度预算闸门（软预算 fail-open：账本读挂了放行并告警——
+        # 成本护栏不是安全边界，为一次账本抖动拒绝所有用户是代价倒挂）
+        if self._meter is not None and self._monthly_token_budget > 0:
+            try:
+                spent = await self._meter.month_spend(req.tenant_id)
+            except Exception:
+                logger.warning("预算读取失败，本次放行（fail-open）", exc_info=True)
+            else:
+                if spent >= self._monthly_token_budget:
+                    raise BudgetExceeded(
+                        f"租户 {req.tenant_id} 本月已用 {spent} token，"
+                        f"预算 {self._monthly_token_budget}"
+                    )
 
         # 红线二：租户配额在候选环外——换供应商换不掉租户身份
         ok = await self._limiter.wait_take(
@@ -200,21 +234,24 @@ class LLMGateway:
             policy = _PROBE_POLICY if decision == "probe" else self._retry_policy
             yielded = False
             buffer: list[LLMChunk] = []
+            usage_seen: UsageChunk | None = None
             try:
-                # aclosing：消费者提前挂断时，关闭信号同步穿透 重试壳→适配器→httpx
                 async with aclosing(complete_with_retry(target, req, cand.model, policy)) as rs:
                     async for chunk in rs:
                         yielded = True
+                        if isinstance(chunk, UsageChunk):
+                            usage_seen = chunk
                         if self._cache is not None:
                             buffer.append(chunk)
                         yield chunk
                 await self._breaker.on_success(cand.provider)
                 if self._cache is not None:
                     try:
-                        await self._cache.put(req, buffer)  # 只有完整走完才会执行到这
+                        await self._cache.put(req, buffer)
                     except Exception:
-                        # 写缓存失败只是少省一次钱——绝不能让已经成功的请求以失败收尾
                         logger.warning("缓存写入失败，跳过", exc_info=True)
+                if usage_seen is not None:
+                    await self._safe_record(req, cand.provider, usage_seen)
                 return
             except _BREAKER_COUNTED as e:
                 await self._breaker.on_failure(cand.provider)
@@ -238,3 +275,12 @@ class LLMGateway:
                 last_error = e  # 本家的配置/转换问题，别家未必过不去
 
         raise GatewayExhausted(f"档位 {req.tier} 的所有候选均不可用") from last_error
+
+    async def _safe_record(self, req: LLMRequest, provider: str, usage: UsageChunk) -> None:
+        """记账失败绝不拖垮请求——为了发票烧掉货物是荒唐的；缺口留给对账脚本暴露。"""
+        if self._meter is None:
+            return
+        try:
+            await self._meter.record(req, provider, usage)
+        except Exception:
+            logger.warning("计量写入失败（对账脚本会暴露此缺口）", exc_info=True)

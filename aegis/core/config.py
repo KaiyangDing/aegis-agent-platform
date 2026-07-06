@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     tenant_burst: float = Field(default=10.0, gt=0)
     limiter_max_wait: float = 10.0  # 限流排队预算
     cache_ttl_seconds: int = 300  # 精确缓存 TTL；0 = 关闭缓存
+    # 模型单价（元/千 token，[输入, 输出]）——演示值，以百炼价目页为准；调价改这里不改代码
+    model_prices: dict[str, list[float]] = {
+        "qwen-flash": [0.00015, 0.0015],
+        "qwen-turbo": [0.0003, 0.0006],
+        "qwen-plus": [0.0008, 0.002],
+        "qwen-max": [0.0024, 0.0096],
+        "deepseek-v3": [0.002, 0.008],
+    }
+    tenant_monthly_token_budget: int = 0  # 租户月度 token 预算；0=关闭，超额抛 BudgetExceeded
     fault_injection_rate: float = 0.0  # 故障注入概率（0=关闭）
     fault_injection_targets: list[str] = []  # 注入目标，如 ["bailian:qwen-plus"]
 

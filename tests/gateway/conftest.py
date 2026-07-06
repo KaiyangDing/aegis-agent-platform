@@ -29,13 +29,9 @@ TEST_DATABASE_URL = os.environ.get(
 
 
 @pytest.fixture
-async def db_session():
-    """事务回滚式 DB 夹具：测试里的一切写入在结束时整体回滚——不脏库、无需清理。
-
-    这是 SQLAlchemy 测试的标准姿势：连接上手动开事务、会话绑在这条连接上，
-    测试结束 rollback——比"测完删数据"可靠（断言失败也不留残渣）。
-    """
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+async def db_conn():
+    """一条带外层事务的连接：测试里发生的一切在结束时整体回滚。"""
+    from sqlalchemy.ext.asyncio import create_async_engine
 
     from aegis.core.db import Base
 
@@ -50,10 +46,26 @@ async def db_session():
         pytest.skip("本地 PostgreSQL 未启动：docker compose -f deploy/docker-compose.yml up -d")
     async with engine.connect() as conn:
         trans = await conn.begin()
-        session = AsyncSession(bind=conn, expire_on_commit=False)
-        try:
-            yield session
-        finally:
-            await session.close()
-            await trans.rollback()  # 整个测试的写入一笔勾销
+        yield conn
+        await trans.rollback()  # 一笔勾销
     await engine.dispose()
+
+
+@pytest.fixture
+def db_session_factory(db_conn):
+    """绑在测试连接上的会话工厂：给'自己开会话自己 commit'的组件（如记账员）注入。
+
+    join_transaction_mode="create_savepoint"：这些会话的 commit 只提交 SAVEPOINT
+    （事务内的书签），外层 rollback 照样把一切吞掉——被测组件真实提交，测试库零污染。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    return async_sessionmaker(
+        bind=db_conn, join_transaction_mode="create_savepoint", expire_on_commit=False
+    )
+
+
+@pytest.fixture
+async def db_session(db_session_factory):
+    async with db_session_factory() as session:
+        yield session
