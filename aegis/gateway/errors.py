@@ -52,9 +52,10 @@ class GatewayOverloadedError(GatewayError):
 class GatewayExhausted(GatewayError):
     """重试与 fallback 全部用尽（发生在首块之前，未产生任何输出）。
 
-    契约（03 §7，加固 B 定稿）：L2 可见的网关异常分两类——
+    契约（03 §7，评审 C6 升级为六类）：L2 可见的网关异常——
     请求级（首块前，可整体降级）：GatewayExhausted / BudgetExceeded /
         TenantQuotaExceeded / GatewayOverloadedError；
+    请求级（确定性拒绝，不降级）：GatewayRejected；
     流级（首块后，进恢复语义）：GatewayStreamInterrupted。
     ProviderError 家族永远不穿出网关。
     """
@@ -66,6 +67,16 @@ class BudgetExceeded(GatewayError):
 
 class TenantQuotaExceeded(GatewayError):
     """租户级出站配额耗尽。换供应商无解（配额跟租户走），调用方应直接降级或提示。"""
+
+
+class GatewayRejected(GatewayError):
+    """全部候选均为确定性拒绝（Auth/BadRequest），且无任何暂时性因素掺入（评审 C6）。
+
+    这是"我们自己的配置/协议 bug"信号——错的 API key、非法的请求转换。
+    与 GatewayExhausted 的分野：Exhausted = 暂时不可用，降级合理；
+    Rejected = 重试和降级都无意义，L2 不走兜底话术（那会把 bug 藏起来），
+    终止 run 并报配置/协议错误（终止原因 gateway_rejected，M2.2 枚举留位）。
+    """
 
 
 class GatewayStreamInterrupted(GatewayError):

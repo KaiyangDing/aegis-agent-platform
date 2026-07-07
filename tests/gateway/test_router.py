@@ -3,9 +3,12 @@ import pytest
 from aegis.gateway import resilience
 from aegis.gateway import router as router_mod
 from aegis.gateway.errors import (
+    AuthError,
+    BadRequestError,
     BudgetExceeded,
     GatewayExhausted,
     GatewayOverloadedError,
+    GatewayRejected,
     GatewayStreamInterrupted,
     ProviderServerError,
     RateLimitedError,
@@ -489,3 +492,50 @@ async def test_fault_mode_midstream_raises_stream_interrupted(monkeypatch):
             got.append(c)
     assert got == [OK_CHUNKS[0]]  # 首块已流出
     assert breaker.failures == ["p1"]
+
+
+async def test_all_rejected_raises_gateway_rejected():
+    """全部候选确定性拒绝：抛 GatewayRejected——bug 信号不许被降级掩盖（评审 C6）。"""
+    p1 = FakeProvider("p1", [AuthError("p1", "bad key")])
+    p2 = FakeProvider("p2", [BadRequestError("p2", "schema 转换非法")])
+    gw, breaker, _ = make_gw([p1, p2])
+    with pytest.raises(GatewayRejected):
+        await collect(gw)
+    assert breaker.failures == []  # 确定性拒绝不记熔断账（原有语义不变）
+
+
+async def test_mixed_rejection_and_transient_stays_exhausted():
+    """掺入任何暂时性因素（5xx）→ 仍是 Exhausted：世界可能自愈，降级合理。"""
+    p1 = FakeProvider("p1", [ProviderServerError("p1", "boom")])
+    p2 = FakeProvider("p2", [AuthError("p2", "bad key")])
+    gw, _, _ = make_gw([p1, p2], retry_policy=RetryPolicy(max_attempts=1))
+    with pytest.raises(GatewayExhausted):
+        await collect(gw)
+
+
+async def test_breaker_deny_counts_as_transient():
+    """有候选被熔断挡下（暂时性）→ 即使其余全被拒也不是 Rejected。"""
+    p1 = FakeProvider("p1", [OK_CHUNKS])  # 被 deny，不会真被调用
+    p2 = FakeProvider("p2", [AuthError("p2", "bad key")])
+    gw, _, _ = make_gw([p1, p2], breaker=StubBreaker({"p1": "deny"}))
+    with pytest.raises(GatewayExhausted):
+        await collect(gw)
+
+
+async def test_request_budget_gate_blocks_oversized_prompt():
+    """单请求闸门：超长 prompt 在碰任何配额之前被明确拒绝（§10.1 #1）。"""
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, limiter = make_gw([p1], request_token_budget=10)
+    req = LLMRequest(
+        tier="fast", tenant_id="t1", messages=[Message(role="user", content="验" * 50)]
+    )
+    with pytest.raises(BudgetExceeded, match="单请求"):
+        [c async for c in gw.complete(req)]
+    assert p1.calls == 0
+    assert limiter.asked == []  # 连配额都没碰——闸门在限流之前
+
+
+async def test_request_budget_zero_means_disabled():
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw([p1], request_token_budget=0)
+    assert await collect(gw) == OK_CHUNKS

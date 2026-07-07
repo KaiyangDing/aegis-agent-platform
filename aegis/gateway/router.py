@@ -12,6 +12,7 @@ Auth/BadRequest 换路不记账（本家配置/转换问题，如历史转 Anthr
 """
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -20,11 +21,13 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Literal, Protocol, get_args
 
+from aegis.core.tokens import estimate_tokens
 from aegis.gateway.errors import (
     AuthError,
     BadRequestError,
     BudgetExceeded,
     GatewayExhausted,
+    GatewayRejected,
     GatewayStreamInterrupted,
     ProviderServerError,
     ProviderTimeoutError,
@@ -102,6 +105,16 @@ def parse_routes(
     return routes
 
 
+def estimate_request_tokens(req: LLMRequest) -> int:
+    """请求入口侧的规模估算：messages 全文 + 工具说明书。
+    只估 prompt 侧——输出上界由 max_tokens 参数本身约束，不重复设闸。"""
+    total = sum(estimate_tokens(m.content) for m in req.messages)
+    for t in req.tools:
+        total += estimate_tokens(t.name) + estimate_tokens(t.description)
+        total += estimate_tokens(json.dumps(t.parameters, ensure_ascii=False))
+    return total
+
+
 @dataclass(frozen=True)
 class GatewayLimits:
     provider_rate: float = 8.0
@@ -157,6 +170,7 @@ class LLMGateway:
         cache: CacheLike | None = None,
         meter: MeterLike | None = None,
         monthly_token_budget: int = 0,
+        request_token_budget: int = 0,
         limits: GatewayLimits | None = None,
         retry_policy: RetryPolicy | None = None,
         fault_rate: float = 0.0,
@@ -170,6 +184,7 @@ class LLMGateway:
         self._cache = cache
         self._meter = meter
         self._monthly_token_budget = monthly_token_budget
+        self._request_token_budget = request_token_budget
         self._limits = limits or GatewayLimits()
         self._retry_policy = retry_policy or RetryPolicy()
         self._fault_rate = fault_rate
@@ -223,6 +238,16 @@ class LLMGateway:
                         f"预算 {self._monthly_token_budget}"
                     )
 
+        # 单请求预算闸门（三级预算的 L1 级，§10.1 #1）：挡超长上下文炸弹。
+        # 在租户限流之前——被拒的请求不该消耗配额；估算口径 ±15%（00 §2.2）
+        if self._request_token_budget > 0:
+            est = estimate_request_tokens(req)
+            if est > self._request_token_budget:
+                raise BudgetExceeded(
+                    f"单请求估算 {est} token，超过预算 "
+                    f"{self._request_token_budget}（估算口径 00 §2.2）"
+                )
+
         # 红线二：租户配额在候选环外——换供应商换不掉租户身份
         ok = await self._limiter.wait_take(
             f"tenant:{req.tenant_id}",
@@ -236,6 +261,8 @@ class LLMGateway:
 
         last_error: Exception | None = None
         budget_out = False
+        rejections = 0  # 确定性拒绝（Auth/BadRequest）计数
+        transients = 0  # 暂时性因素计数：熔断拒/限流拒/5xx/超时/429
         for cand in candidates:
             if (
                 deadline is not None
@@ -247,6 +274,7 @@ class LLMGateway:
 
             decision = await self._breaker.allow(cand.provider)
             if decision == "deny":
+                transients += 1
                 continue
 
             ok = await self._limiter.wait_take(
@@ -259,6 +287,7 @@ class LLMGateway:
                 if decision == "probe":
                     # 领了全集群唯一的探测令牌却没打出去——必须归还，否则半开期空转
                     await self._breaker.release_probe(cand.provider)
+                transients += 1
                 continue  # 这家连排队都排不上，换下一站
 
             target: Provider = provider
@@ -295,6 +324,7 @@ class LLMGateway:
                     # 红线一：半截不换路。包装成契约内的流中断类型（加固 B）——
                     # ProviderError 家族不穿出网关，原始死因在 __cause__
                     raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
+                transients += 1
                 last_error = e
             except RateLimitedError as e:
                 if decision == "probe":
@@ -302,18 +332,26 @@ class LLMGateway:
                     await self._breaker.release_probe(cand.provider)
                 if yielded:
                     raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
+                transients += 1
                 last_error = e  # 429 不记熔断账：上游活着，只是挤
             except (AuthError, BadRequestError) as e:
                 if decision == "probe":
                     await self._breaker.release_probe(cand.provider)
                 if yielded:
                     raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
+                rejections += 1
                 last_error = e  # 本家的配置/转换问题，别家未必过不去
 
         if budget_out:
             raise GatewayExhausted(
                 f"档位 {req.tier} 首块预算 {req.deadline_s}s 耗尽（候选链未走完）"
             ) from last_error
+
+        if rejections > 0 and transients == 0:
+            raise GatewayRejected(
+                f"档位 {req.tier} 全部候选均被确定性拒绝——检查 API key 配置与请求转换"
+            ) from last_error
+
         raise GatewayExhausted(f"档位 {req.tier} 的所有候选均不可用") from last_error
 
     async def _safe_record(self, req: LLMRequest, provider: str, usage: UsageChunk) -> None:

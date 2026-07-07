@@ -53,6 +53,9 @@ class Settings(BaseSettings):
         "deepseek-v3": [0.002, 0.008],
     }
     tenant_monthly_token_budget: int = 0  # 租户月度 token 预算；0=关闭，超额抛 BudgetExceeded
+    request_token_budget: int = (
+        0  # 单请求 token 预算（估算口径）；0=关闭（§10.1 #1，三级预算 L1 级）
+    )
     fault_injection_rate: float = 0.0  # 故障注入概率（0=关闭）
     fault_injection_targets: list[str] = []  # 注入目标，如 ["bailian:qwen-plus"]
     fault_injection_mode: Literal["error", "hang", "midstream"] = (

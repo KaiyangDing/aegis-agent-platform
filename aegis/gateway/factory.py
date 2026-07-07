@@ -49,4 +49,5 @@ def build_gateway() -> LLMGateway:
             {m: (Decimal(str(p)), Decimal(str(c))) for m, (p, c) in s.model_prices.items()},
         ),
         monthly_token_budget=s.tenant_monthly_token_budget,
+        request_token_budget=s.request_token_budget,
     )
