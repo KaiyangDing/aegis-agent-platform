@@ -43,6 +43,7 @@ def build_gateway() -> LLMGateway:
         ),
         fault_rate=s.fault_injection_rate,
         fault_targets=frozenset(s.fault_injection_targets),
+        fault_mode=s.fault_injection_mode,
         meter=MeteringRecorder(
             get_session_factory(),
             {m: (Decimal(str(p)), Decimal(str(c))) for m, (p, c) in s.model_prices.items()},

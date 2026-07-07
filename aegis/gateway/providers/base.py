@@ -34,13 +34,16 @@ _client: httpx.AsyncClient | None = None
 def shared_client() -> httpx.AsyncClient:
     """进程级单例：复用 keep-alive 连接池（架构 §6 三处连接池之一）。
 
-    超时按用途分离：连接 5s（网不通要快速失败）、读取 90s（LLM 生成慢是正常的）。
+    超时按用途分离（§2.2 超时语义，评审 C1）：连接 5s——网不通要快速失败；
+    read 30s——流式响应下 httpx 的 read 作用于每次 socket 读，语义即"块间空闲超时"：
+    守护"上游活着但不吐字"的挂起，不限制整流总时长（长回答持续出 token 就是健康的）。
+    首块超时（25s）在重试层用 asyncio.timeout 单独把守，见 resilience.py。
     池上限显式写出（虽是 httpx 默认值）：它是背压刹车，PoolTimeout 的语义依赖这两个数。
     """
     global _client
     if _client is None:
         _client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=90.0, write=10.0, pool=5.0),
+            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
         )
     return _client

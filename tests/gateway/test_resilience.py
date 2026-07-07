@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 import pytest
 
 from aegis.gateway import resilience
@@ -134,3 +137,69 @@ async def test_total_timeout_budget_stops_retrying(sleeps):
         await collect(p, RetryPolicy(total_timeout=0.0))  # 预算为零：一次都不许等
     assert p.calls == 1
     assert sleeps == []
+
+
+class HangingProvider:
+    """连上了但不吐首字——评审 C1 的'挂起'形态（真实供应商事故最常见）。"""
+
+    name = "hanging"
+
+    def __init__(self, hang_calls: int = 10**9):
+        self.hang_calls = hang_calls
+        self.calls = 0
+
+    async def complete(self, req, model):
+        self.calls += 1
+        if self.calls <= self.hang_calls:
+            await asyncio.sleep(999)
+        for c in OK_CHUNKS:
+            yield c
+
+
+async def test_first_chunk_timeout_cuts_hang(sleeps):
+    """挂起被首块超时切断，翻译成 ProviderTimeoutError——可重试、记熔断账的形态。"""
+    p = HangingProvider()
+    with pytest.raises(ProviderTimeoutError, match="首块超时"):
+        await collect(p, RetryPolicy(max_attempts=1, first_chunk_timeout=0.05))
+    assert p.calls == 1
+
+
+async def test_hang_walks_standard_retry_path(sleeps, no_jitter):
+    """挂起两次后恢复：走的是与 5xx 完全相同的重试路径，零新分支。"""
+    p = HangingProvider(hang_calls=2)
+    got = await collect(p, RetryPolicy(max_attempts=3, first_chunk_timeout=0.05))
+    assert got == OK_CHUNKS
+    assert p.calls == 3
+    assert len(sleeps) == 2
+
+
+async def test_deadline_blocks_further_attempts(sleeps):
+    """deadline 剩余不足 min_attempt_budget：不再开新尝试，真实死因原样上抛。"""
+    p = ScriptedProvider(
+        [ProviderServerError("x", "real-cause"), ProviderServerError("x", "second")]
+    )
+    gen = complete_with_retry(
+        p, make_req(), "m", RetryPolicy(max_attempts=3), deadline=time.monotonic() + 0.5
+    )
+    with pytest.raises(ProviderServerError, match="real-cause"):
+        async for _ in gen:
+            pass
+    assert p.calls == 1  # 剩余 0.5s < 8s 门槛：第二次尝试没资格开始
+    assert sleeps == []
+
+
+async def test_deadline_caps_first_chunk_wait():
+    """剩余预算比 first_chunk_timeout 更紧时取小值等首块——等的是预算不是参数。"""
+    p = HangingProvider()
+    start = time.monotonic()
+    gen = complete_with_retry(
+        p,
+        make_req(),
+        "m",
+        RetryPolicy(max_attempts=1, first_chunk_timeout=30.0, min_attempt_budget=0.0),
+        deadline=start + 0.05,
+    )
+    with pytest.raises(ProviderTimeoutError):
+        async for _ in gen:
+            pass
+    assert time.monotonic() - start < 5.0  # 若没取小值，这里要等 30s 才红

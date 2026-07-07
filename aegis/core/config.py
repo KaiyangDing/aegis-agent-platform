@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     tenant_monthly_token_budget: int = 0  # 租户月度 token 预算；0=关闭，超额抛 BudgetExceeded
     fault_injection_rate: float = 0.0  # 故障注入概率（0=关闭）
     fault_injection_targets: list[str] = []  # 注入目标，如 ["bailian:qwen-plus"]
+    fault_injection_mode: Literal["error", "hang", "midstream"] = (
+        "error"  # 注入形态（评审 C1 补挂起/断流盲区）
+    )
 
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":

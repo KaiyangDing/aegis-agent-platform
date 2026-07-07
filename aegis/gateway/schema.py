@@ -54,6 +54,10 @@ class LLMRequest(BaseModel):
     tenant_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     session_id: str | None = None  # 进 usage_ledger，会话维度对账用
     request_id: str = Field(default_factory=lambda: uuid4().hex)
+    # 首块预算（秒，None=不设）：从进入网关起，超过该时长仍未产出首块，网关以异常终局。
+    # 只约束"首块前"的空转（尝试/重试/换路）；首块后的流健康由块间空闲超时守护，
+    # 整流时长不设上限——§2.2 超时语义（评审 C1）。M2.7 的闸门 #2 由此传播。
+    deadline_s: float | None = Field(default=None, gt=0)
 
 
 # ---- 流式响应的四种块（运行时契约 03 §7 定死的四类）----

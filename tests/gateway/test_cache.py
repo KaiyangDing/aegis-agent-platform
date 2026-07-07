@@ -86,3 +86,14 @@ async def test_stream_without_substance_never_stored(r):
     ]
     await cache.put(req(content="空洞流"), tail_only)
     assert await cache.get(req(content="空洞流")) is None
+
+
+def test_deadline_excluded_from_cache_key():
+    """deadline 是传输参数不是语义：同样的问题±预算必须命中同一条缓存。"""
+    from aegis.gateway.cache import ExactCache
+    from aegis.gateway.schema import LLMRequest, Message
+
+    cache = ExactCache(None)  # type: ignore[arg-type]  # _key 不碰 redis
+    a = LLMRequest(tier="fast", tenant_id="t1", messages=[Message(role="user", content="x")])
+    b = a.model_copy(update={"deadline_s": 90.0})
+    assert cache._key(a) == cache._key(b)

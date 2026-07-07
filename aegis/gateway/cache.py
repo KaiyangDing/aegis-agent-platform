@@ -36,7 +36,7 @@ class ExactCache:
         self._ttl = ttl_seconds
 
     def _key(self, req: LLMRequest) -> str:
-        essence = req.model_dump(exclude={"request_id", "session_id", "tenant_id"})
+        essence = req.model_dump(exclude={"request_id", "session_id", "tenant_id", "deadline_s"})
         blob = json.dumps(essence, sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
         return f"aegis:cache:v1:{req.tenant_id}:{digest}"

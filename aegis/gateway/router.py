@@ -11,12 +11,14 @@
 Auth/BadRequest 换路不记账（本家配置/转换问题，如历史转 Anthropic 失败）。
 """
 
+import asyncio
 import logging
 import random
+import time
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from dataclasses import dataclass
-from typing import Protocol, get_args
+from typing import Literal, Protocol, get_args
 
 from aegis.gateway.errors import (
     AuthError,
@@ -39,6 +41,8 @@ _PROBE_POLICY = RetryPolicy(max_attempts=1)  # 探针一次定胜负，别拿重
 _BREAKER_COUNTED = (ProviderServerError, ProviderTimeoutError)
 
 _random = random.random  # 测试接缝
+_hang_sleep = asyncio.sleep  # 测试接缝：hang 注入的睡眠可替换/可观测
+FaultMode = Literal["error", "hang", "midstream"]
 
 
 class BreakerLike(Protocol):
@@ -108,21 +112,36 @@ class GatewayLimits:
 
 
 class FaultInjector:
-    """Provider 的装饰器：按概率在首块前抛 5xx——演示/实验专用。
+    """Provider 的装饰器：按概率注入三种故障形态——演示/实验专用。
 
     自己就实现 Provider 协议，重试/熔断对它一视同仁，不知道故障是演的。
-    只在首块前注入（模拟连接阶段失败），保证可被重试/熔断/换路完整处理。
+    - error：首块前抛 5xx（M1 原有形态，模拟连接阶段失败）；
+    - hang：首块前挂起不吐字（评审 C1 的盲区——由首块超时真实切断，不是模拟切断）；
+    - midstream：吐出首块后死掉（触发半截语义 GatewayStreamInterrupted）。
     """
 
-    def __init__(self, inner: Provider, rate: float):
+    def __init__(
+        self, inner: Provider, rate: float, *, mode: FaultMode = "error", hang_s: float = 120.0
+    ):
         self._inner = inner
         self._rate = rate
+        self._mode = mode
+        self._hang_s = hang_s
         self.name = inner.name
 
     async def complete(self, req: LLMRequest, model: str) -> AsyncGenerator[LLMChunk]:
-        if _random() < self._rate:
-            raise ProviderServerError(self.name, "故障注入（fault_injection_rate）")
+        inject = _random() < self._rate
+        if inject and self._mode == "error":
+            raise ProviderServerError(self.name, "故障注入（error）")
+        if inject and self._mode == "hang":
+            await _hang_sleep(self._hang_s)  # 等着被首块超时取消——考验真实机制
+            raise ProviderServerError(self.name, "故障注入（hang 兜底，正常不应到达）")
         async with aclosing(self._inner.complete(req, model)) as inner:
+            if inject and self._mode == "midstream":
+                first = await anext(inner, None)
+                if first is not None:
+                    yield first  # 首块已流出——下游进入"半截"境地
+                raise ProviderTimeoutError(self.name, "故障注入（midstream：首块后断流）")
             async for chunk in inner:
                 yield chunk
 
@@ -142,6 +161,7 @@ class LLMGateway:
         retry_policy: RetryPolicy | None = None,
         fault_rate: float = 0.0,
         fault_targets: frozenset[str] = frozenset(),
+        fault_mode: FaultMode = "error",
     ):
         self._providers = providers
         self._routes = routes
@@ -154,6 +174,7 @@ class LLMGateway:
         self._retry_policy = retry_policy or RetryPolicy()
         self._fault_rate = fault_rate
         self._fault_targets = fault_targets
+        self._fault_mode = fault_mode
 
     async def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
         # 配置防御：parse_routes 已保证齐档，但手工构造的路由表（如测试）可能缺档——
@@ -161,6 +182,12 @@ class LLMGateway:
         candidates = self._routes.get(req.tier)
         if not candidates:
             raise GatewayExhausted(f"档位 {req.tier} 没有配置任何候选（检查 MODEL_ROUTES）")
+
+        # §2.2 超时语义（评审 C1）：deadline 只约束"首块前"的空转。换算成绝对单调钟
+        # 沿候选链与重试层传播；首块流出后不再看它——整流不设上限，块间空闲由 httpx read 守护
+        deadline: float | None = None
+        if req.deadline_s is not None:
+            deadline = time.monotonic() + req.deadline_s
 
         # 最外圈：缓存命中 = 零上游成本，不该消耗任何配额、不该问任何闸门。
         # 缓存的任何故障（连接失败/脏数据）都退化为 miss——缓存永远不许拖死主链路
@@ -208,7 +235,14 @@ class LLMGateway:
             raise TenantQuotaExceeded(f"租户 {req.tenant_id} 出站配额耗尽")
 
         last_error: Exception | None = None
+        budget_out = False
         for cand in candidates:
+            if (
+                deadline is not None
+                and deadline - time.monotonic() < self._retry_policy.min_attempt_budget
+            ):
+                budget_out = True  # 剩余预算连一次像样的尝试都开不起：停止换路
+                break
             provider = self._providers[cand.provider]
 
             decision = await self._breaker.allow(cand.provider)
@@ -229,14 +263,16 @@ class LLMGateway:
 
             target: Provider = provider
             if self._fault_rate > 0 and f"{cand.provider}:{cand.model}" in self._fault_targets:
-                target = FaultInjector(provider, self._fault_rate)
+                target = FaultInjector(provider, self._fault_rate, mode=self._fault_mode)
 
             policy = _PROBE_POLICY if decision == "probe" else self._retry_policy
             yielded = False
             buffer: list[LLMChunk] = []
             usage_seen: UsageChunk | None = None
             try:
-                async with aclosing(complete_with_retry(target, req, cand.model, policy)) as rs:
+                async with aclosing(
+                    complete_with_retry(target, req, cand.model, policy, deadline=deadline)
+                ) as rs:
                     async for chunk in rs:
                         yielded = True
                         if isinstance(chunk, UsageChunk):
@@ -274,6 +310,10 @@ class LLMGateway:
                     raise GatewayStreamInterrupted(f"流中断于 {cand.provider}:{cand.model}") from e
                 last_error = e  # 本家的配置/转换问题，别家未必过不去
 
+        if budget_out:
+            raise GatewayExhausted(
+                f"档位 {req.tier} 首块预算 {req.deadline_s}s 耗尽（候选链未走完）"
+            ) from last_error
         raise GatewayExhausted(f"档位 {req.tier} 的所有候选均不可用") from last_error
 
     async def _safe_record(self, req: LLMRequest, provider: str, usage: UsageChunk) -> None:

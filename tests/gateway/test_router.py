@@ -1,6 +1,7 @@
 import pytest
 
 from aegis.gateway import resilience
+from aegis.gateway import router as router_mod
 from aegis.gateway.errors import (
     BudgetExceeded,
     GatewayExhausted,
@@ -444,3 +445,47 @@ async def test_meter_failures_never_break_request():
     gw, _, _ = make_gw([p1], meter=ExplodingMeter(), monthly_token_budget=100)
     # month_spend 挂 → fail-open 放行；record 挂 → 只告警。请求全程无感
     assert await collect(gw) == OK_CHUNKS
+
+
+async def test_deadline_gate_before_any_candidate():
+    """预算开局就不足：一个候选都不骚扰，终局异常写明死法是预算耗尽。"""
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw([p1])
+    req = make_req().model_copy(update={"deadline_s": 0.001})  # 0.001s < 8s 门槛
+    with pytest.raises(GatewayExhausted, match="首块预算"):
+        [c async for c in gw.complete(req)]
+    assert p1.calls == 0
+
+
+async def test_fault_mode_hang_is_cut_and_fails_over(monkeypatch):
+    """C1 主路径全线贯通：挂起 → 首块超时切断 → 记熔断账 → 换路成功。"""
+    monkeypatch.setattr(router_mod, "_random", lambda: 0.0)  # 注入必中
+    p1, p2 = FakeProvider("p1", [OK_CHUNKS]), FakeProvider("p2", [OK_CHUNKS])
+    gw, breaker, _ = make_gw(
+        [p1, p2],
+        retry_policy=RetryPolicy(max_attempts=1, first_chunk_timeout=0.05),
+        fault_rate=1.0,
+        fault_targets=frozenset({"p1:model-p1"}),
+        fault_mode="hang",
+    )
+    assert await collect(gw) == OK_CHUNKS
+    assert (p1.calls, p2.calls) == (0, 1)  # 替身在挂起，真身 p1 从未被调用
+    assert breaker.failures == ["p1"]  # 挂起记熔断账——C1 修复的核心断言
+
+
+async def test_fault_mode_midstream_raises_stream_interrupted(monkeypatch):
+    """首块后断流：半截不换路，包装成 GatewayStreamInterrupted 且记熔断账。"""
+    monkeypatch.setattr(router_mod, "_random", lambda: 0.0)
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, breaker, _ = make_gw(
+        [p1],
+        fault_rate=1.0,
+        fault_targets=frozenset({"p1:model-p1"}),
+        fault_mode="midstream",
+    )
+    got = []
+    with pytest.raises(GatewayStreamInterrupted):
+        async for c in gw.complete(make_req()):
+            got.append(c)
+    assert got == [OK_CHUNKS[0]]  # 首块已流出
+    assert breaker.failures == ["p1"]
