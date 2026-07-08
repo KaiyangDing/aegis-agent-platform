@@ -1,5 +1,8 @@
 import asyncio
 import uuid
+from typing import cast
+
+import redis.asyncio as aioredis
 
 from aegis.gateway.ratelimit import RateLimiter
 
@@ -81,3 +84,67 @@ async def test_degraded_quota_divided_by_replicas(dead_r):
     rl, s = RateLimiter(dead_r, replicas=2), scope()  # 两副本：本地只拿全局的一半
     results = [await rl.try_take(s, rate=1, capacity=4) for _ in range(3)]
     assert [ok for ok, _ in results] == [True, True, False]  # capacity 4/2=2
+
+
+# ---------- 复盘补丁二：降级粘滞 + 顺路探针 ----------
+
+
+class _FlakyScript:
+    """可开关的假 Lua 脚本：先挂后好，模拟 Redis 从故障到恢复的完整周期。"""
+
+    def __init__(self) -> None:
+        self.fail = True
+        self.calls = 0
+
+    async def __call__(self, keys: list, args: list) -> list:
+        self.calls += 1
+        if self.fail:
+            raise ConnectionError("redis down")
+        return [1, "0"]
+
+
+class _FakeRedis:
+    """只鸭子实现 RateLimiter 用到的 register_script；cast 只为过 mypy。"""
+
+    def __init__(self) -> None:
+        self.script = _FlakyScript()
+
+    def register_script(self, lua: str) -> _FlakyScript:
+        return self.script
+
+
+def _flaky_limiter(probe_interval: float) -> tuple[RateLimiter, _FlakyScript]:
+    fake = _FakeRedis()
+    rl = RateLimiter(cast(aioredis.Redis, fake), probe_interval=probe_interval)
+    return rl, fake.script
+
+
+async def test_degraded_is_sticky_not_hammering_redis():
+    rl, script = _flaky_limiter(probe_interval=60.0)
+    s = scope()
+    for _ in range(6):
+        await rl.try_take(s, rate=50, capacity=25)
+    assert script.calls == 1  # 只有首次撞了 Redis；降级期内不再每次支付连接失败延迟
+
+
+async def test_probe_recovers_and_switches_back():
+    rl, script = _flaky_limiter(probe_interval=0.3)
+    s = scope()
+    await rl.try_take(s, rate=50, capacity=25)  # 首次失败 → 降级
+    script.fail = False  # Redis"复活"
+    await asyncio.sleep(0.35)  # 越过探测窗
+    ok, _ = await rl.try_take(s, rate=50, capacity=25)
+    assert ok and script.calls == 2  # 这次是探针：打到 Redis 并拿到共享桶裁决
+    await rl.try_take(s, rate=50, capacity=25)
+    assert script.calls == 3  # 已切回共享桶：之后每次都走 Redis
+
+
+async def test_failed_probe_stays_degraded_and_reschedules():
+    rl, script = _flaky_limiter(probe_interval=0.3)
+    s = scope()
+    await rl.try_take(s, rate=50, capacity=25)  # 降级
+    await asyncio.sleep(0.35)
+    ok, _ = await rl.try_take(s, rate=50, capacity=25)  # 探针出击，仍失败
+    assert ok and script.calls == 2  # 裁决由本地桶兜底，请求没有被故障拖死
+    await rl.try_take(s, rate=50, capacity=25)  # 下一个探测窗未到
+    assert script.calls == 2  # 失败探针把窗口顺延——不连环撞

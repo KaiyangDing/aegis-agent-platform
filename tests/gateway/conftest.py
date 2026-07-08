@@ -4,6 +4,8 @@ import os
 
 import pytest
 import redis.asyncio as aioredis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 
 TEST_REDIS_URL = os.environ.get("AEGIS_TEST_REDIS_URL", "redis://localhost:6379/9")
 
@@ -25,11 +27,13 @@ async def r():
 
 @pytest.fixture
 async def dead_r():
-    """指向无人监听端口的客户端：模拟 Redis 整体不可用（超时调到最小，测试不拖沓）。"""
+    """指向无人监听端口的客户端：模拟 Redis 整体不可用（超时与重试调到最小——
+    redis-py 8 默认 retries=10 + 指数退避，一次失败调用要白睡约 2 秒）。"""
     client = aioredis.from_url(
         "redis://localhost:6399/0",
         socket_connect_timeout=0.1,
         socket_timeout=0.1,
+        retry=Retry(NoBackoff(), 0),  # 失败一次出结果，不进默认退避
         decode_responses=True,
     )
     yield client
