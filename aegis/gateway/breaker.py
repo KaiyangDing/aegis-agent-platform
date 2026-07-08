@@ -34,13 +34,13 @@ class _LocalState:
 
 class CircuitBreaker:
     def __init__(
-        self,
-        redis: aioredis.Redis,
-        *,
-        failure_threshold: int = 5,
-        open_seconds: int = 30,
-        probe_ttl: int = 120,  # 必须 ≥ 读超时 90s：探针飞行中令牌过期会放出第二个并发探针
-        fail_window: int = 120,
+            self,
+            redis: aioredis.Redis,
+            *,
+            failure_threshold: int = 5,
+            open_seconds: int = 30,
+            probe_ttl: int = 120,  # 必须 ≥ 读超时 90s：探针飞行中令牌过期会放出第二个并发探针
+            fail_window: int = 120,
     ):
         self._r = redis
         self._threshold = failure_threshold
@@ -54,6 +54,17 @@ class CircuitBreaker:
         base = f"aegis:cb:{provider}"
         return f"{base}:open", f"{base}:fails", f"{base}:probe"
 
+    async def allow(self, provider: str) -> Decision:
+        try:
+            decision = await self._allow_redis(provider)
+        except Exception:
+            self._note_degraded()
+            return self._local_allow(provider)
+        if self._degraded:
+            logger.warning("Redis 熔断状态恢复，切回集体记忆")
+            self._degraded = False
+        return decision
+
     async def _allow_redis(self, provider: str) -> Decision:
         """请求放行判定：allow=正常 / probe=你是唯一探针 / deny=快速拒绝。"""
         open_key, fails_key, probe_key = self._keys(provider)
@@ -66,43 +77,19 @@ class CircuitBreaker:
         won = await self._r.set(probe_key, "1", nx=True, ex=self._probe_ttl)
         return "probe" if won else "deny"
 
-    async def allow(self, provider: str) -> Decision:
-        try:
-            decision = await self._allow_redis(provider)
-        except Exception:
-            self._note_degraded()
-            return self._local_allow(provider)
-        if self._degraded:
-            logger.warning("Redis 熔断状态恢复，切回集体记忆")
-            self._degraded = False
-        return decision
-
-    def _note_degraded(self) -> None:
-        if not self._degraded:
-            logger.warning(
-                "Redis 熔断状态不可用，降级为本地计数（fail-open 基调；"
-                "'全集群唯一探针'等承诺在降级期间失效）",
-                exc_info=True,
-            )
-            self._degraded = True
-
     def _local_allow(self, provider: str) -> Decision:
         st = self._local.setdefault(provider, _LocalState())
         now = time.monotonic()
         if st.open_until > now:
             return "deny"
         if st.fails >= self._threshold:
-            st.fails = 0  # 视作半开放行一次；再失败会立刻重新攒满
+            # 半开放行一个探针；计数退到阈值-1 → 再失败一次立即重开，
+            # 与主路径不变量一致（test_probe_failure_reopens_immediately）。
+            # 已知缺口：探针飞行期间的并发请求会 allow 漏过（内存版无 SET NX
+            # 的原子占位）——降级"自保而非一致"的定位显式接受
+            st.fails = self._threshold - 1
             return "probe"
         return "allow"
-
-    async def _on_failure_redis(self, provider: str) -> None:
-        open_key, fails_key, probe_key = self._keys(provider)
-        fails = await self._r.incr(fails_key)
-        await self._r.expire(fails_key, self._fail_window)
-        if fails >= self._threshold:
-            await self._r.set(open_key, "1", ex=self._open_seconds)
-            await self._r.delete(probe_key)  # 探测失败的场景：令牌作废，重新计时
 
     async def on_success(self, provider: str) -> None:
         """成功 = 彻底闭合：三把 key 一并清掉。"""
@@ -122,6 +109,14 @@ class CircuitBreaker:
         except Exception:
             self._note_degraded()
 
+    async def _on_failure_redis(self, provider: str) -> None:
+        open_key, fails_key, probe_key = self._keys(provider)
+        fails = await self._r.incr(fails_key)
+        await self._r.expire(fails_key, self._fail_window)
+        if fails >= self._threshold:
+            await self._r.set(open_key, "1", ex=self._open_seconds)
+            await self._r.delete(probe_key)  # 探测失败的场景：令牌作废，重新计时
+
     async def release_probe(self, provider: str) -> None:
         """归还未获裁决的探测令牌——探针没打出去或结果不构成裁决时调用。
 
@@ -133,3 +128,12 @@ class CircuitBreaker:
             await self._r.delete(self._keys(provider)[2])
         except Exception:
             self._note_degraded()
+
+    def _note_degraded(self) -> None:
+        if not self._degraded:
+            logger.warning(
+                "Redis 熔断状态不可用，降级为本地计数（fail-open 基调；"
+                "'全集群唯一探针'等承诺在降级期间失效）",
+                exc_info=True,
+            )
+            self._degraded = True

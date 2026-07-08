@@ -122,3 +122,14 @@ async def test_degraded_breaker_fails_open_then_counts_locally(dead_r):
     assert await b.allow(p) == "probe"  # 本地版半开
     await b.on_success(p)
     assert await b.allow(p) == "allow"  # 成功清账，彻底闭合
+
+
+async def test_degraded_probe_failure_reopens_immediately(dead_r):
+    """本地版半开与主路径同一不变量：探测失败 → 立即重新打开（复盘修正）。"""
+    b, p = CircuitBreaker(dead_r, failure_threshold=2, open_seconds=1), name()
+    await b.on_failure(p)
+    await b.on_failure(p)
+    await asyncio.sleep(1.1)
+    assert await b.allow(p) == "probe"  # 本地半开放行一个探针
+    await b.on_failure(p)  # 探针失败
+    assert await b.allow(p) == "deny"  # 立即重开，不再漏第二个
