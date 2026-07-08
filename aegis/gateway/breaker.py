@@ -26,21 +26,26 @@ Decision = Literal["allow", "probe", "deny"]
 
 @dataclass
 class _LocalState:
-    """降级形态的单机记忆：失去 Redis 集体记忆后各副本各自为政（自保而非全集群一致）。"""
+    """降级形态的单机记忆：失去 Redis 集体记忆后各副本各自为政（自保而非全集群一致）。
+
+    三键状态机的进程内完整镜像（2026-07-08 复盘升级）：fails/open_until/probe_until
+    ↔ fails/open/probe 三把 key。四个镜像点各有单测钉死。
+    """
 
     fails: int = 0
     open_until: float = field(default=0.0)
+    probe_until: float = field(default=0.0)  # 本地探测令牌：主路径 SET NX 的进程内镜像
 
 
 class CircuitBreaker:
     def __init__(
-            self,
-            redis: aioredis.Redis,
-            *,
-            failure_threshold: int = 5,
-            open_seconds: int = 30,
-            probe_ttl: int = 120,  # 必须 ≥ 读超时 90s：探针飞行中令牌过期会放出第二个并发探针
-            fail_window: int = 120,
+        self,
+        redis: aioredis.Redis,
+        *,
+        failure_threshold: int = 5,
+        open_seconds: int = 30,
+        probe_ttl: int = 120,  # 必须 ≥ 读超时 90s：探针飞行中令牌过期会放出第二个并发探针
+        fail_window: int = 120,
     ):
         self._r = redis
         self._threshold = failure_threshold
@@ -83,11 +88,12 @@ class CircuitBreaker:
         if st.open_until > now:
             return "deny"
         if st.fails >= self._threshold:
-            # 半开放行一个探针；计数退到阈值-1 → 再失败一次立即重开，
-            # 与主路径不变量一致（test_probe_failure_reopens_immediately）。
-            # 已知缺口：探针飞行期间的并发请求会 allow 漏过（内存版无 SET NX
-            # 的原子占位）——降级"自保而非一致"的定位显式接受
-            st.fails = self._threshold - 1
+            # 半开与主路径同构：令牌互斥只放一个探针、其余 deny（堵挂起场景下
+            # 探针飞行 25s 的并发泄漏窗）；fails 不动——探测失败 +1 后仍≥阈值，
+            # 立即重开（不变量：test_probe_failure_reopens_immediately 的降级镜像）
+            if st.probe_until > now:
+                return "deny"
+            st.probe_until = now + self._probe_ttl
             return "probe"
         return "allow"
 
@@ -104,6 +110,9 @@ class CircuitBreaker:
         st.fails += 1
         if st.fails >= self._threshold:
             st.open_until = time.monotonic() + self._open_seconds
+            # 镜像 _on_failure_redis 的 delete(probe_key)：令牌作废——
+            # 否则重开(30s)后被残留令牌(120s)再多锁 90s
+            st.probe_until = 0.0
         try:
             await self._on_failure_redis(provider)
         except Exception:
@@ -122,8 +131,11 @@ class CircuitBreaker:
 
         无 owner-token 校验（已知取舍）：极端时序下可能误删其他副本刚领的
         新令牌，代价只是多放一个探针、可自愈；owner CAD 在此属过度设计。
-        本地降级形态无令牌概念，仅 Redis 路径需要归还。
+        本地令牌同步归还（完整镜像后本地也有令牌概念——2026-07-08 复盘升级）。
         """
+        st = self._local.get(provider)
+        if st is not None:
+            st.probe_until = 0.0
         try:
             await self._r.delete(self._keys(provider)[2])
         except Exception:
