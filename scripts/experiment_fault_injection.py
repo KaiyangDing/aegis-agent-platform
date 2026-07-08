@@ -35,6 +35,10 @@ from aegis.gateway.factory import build_gateway  # noqa: E402
 from aegis.gateway.providers.openai_compat import OpenAICompatProvider  # noqa: E402
 from aegis.gateway.schema import LLMRequest, Message, UsageChunk  # noqa: E402
 
+# 报告锚定项目根，不受"从哪个目录运行"影响（PyCharm 默认 cwd=脚本目录，
+# 会把相对路径 reports/ 写成 scripts/reports/）
+ROOT = Path(__file__).resolve().parent.parent  # scripts/ 的上一级 = 项目根
+
 N = 1000
 WORKERS = 10
 TENANT = f"exp-{uuid.uuid4().hex[:6]}"
@@ -178,9 +182,11 @@ async def main() -> None:
     lines += await ledger_check(success)
     report = "\n".join(lines)
     print("\n" + report)
-    Path("reports").mkdir(exist_ok=True)
-    Path("reports/m1_fault_injection.txt").write_text(report, encoding="utf-8")
-    print("\n报告已写入 reports/m1_fault_injection.txt（提交它——简历数字的原始凭证）")
+    reports_dir = ROOT / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    out = reports_dir / "m1_fault_injection.txt"
+    out.write_text(report, encoding="utf-8")
+    print(f"\n报告已写入 {out}（提交它——简历数字的原始凭证）")
 
 
 if __name__ == "__main__":
