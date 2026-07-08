@@ -44,7 +44,9 @@ class CircuitBreaker:
         *,
         failure_threshold: int = 5,
         open_seconds: int = 30,
-        probe_ttl: int = 120,  # 必须 ≥ 读超时 90s：探针飞行中令牌过期会放出第二个并发探针
+        probe_ttl: int = 120,  # 下界=失败裁决最坏耗时(限流排队10+connect5+首块25≈40s)×3 余量，
+        #                        C1 改造后旧口径"≥读超时90s"已失效；上界=丢探针的额外锁死时间
+        #                        （实际被 fail_window 封顶：fails 过期会让半开自动溶解为闭合）
         fail_window: int = 120,
     ):
         self._r = redis
