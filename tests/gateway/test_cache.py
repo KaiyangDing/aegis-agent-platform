@@ -1,5 +1,6 @@
 from aegis.gateway.cache import ExactCache
 from aegis.gateway.schema import (
+    LLMChunk,
     LLMRequest,
     Message,
     StopChunk,
@@ -9,7 +10,7 @@ from aegis.gateway.schema import (
     UsageChunk,
 )
 
-CHUNKS = [
+CHUNKS: list[LLMChunk] = [
     TextDelta(text="你好"),
     ToolCallChunk(tool_call=ToolCall(id="c1", name="f", arguments_json="{}")),
     UsageChunk(model="m", prompt_tokens=3, completion_tokens=4),
@@ -80,7 +81,7 @@ async def test_incomplete_stream_never_stored(r):
 async def test_stream_without_substance_never_stored(r):
     # 审计加固 A：只有 Usage+Stop 的"空洞流"（如被合成尾块骗过的截断）也不许入库
     cache = ExactCache(r, ttl_seconds=60)
-    tail_only = [
+    tail_only: list[LLMChunk] = [
         UsageChunk(model="m", prompt_tokens=1, completion_tokens=0),
         StopChunk(reason="end_turn"),
     ]

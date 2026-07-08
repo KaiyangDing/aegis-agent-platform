@@ -52,7 +52,7 @@ jobs:
         run: uv run ruff check .
 
       - name: 类型检查（mypy）
-        run: uv run mypy aegis
+        run: uv run mypy .
 
       - name: 架构分层检查（import-linter）
         run: uv run lint-imports

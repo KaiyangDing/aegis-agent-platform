@@ -16,7 +16,7 @@ from aegis.gateway.errors import (
 )
 from aegis.gateway.resilience import RetryPolicy
 from aegis.gateway.router import Candidate, GatewayLimits, LLMGateway, parse_routes
-from aegis.gateway.schema import LLMRequest, Message, StopChunk, TextDelta, UsageChunk
+from aegis.gateway.schema import LLMRequest, Message, StopChunk, TextDelta, Tier, UsageChunk
 
 OK_CHUNKS = [
     TextDelta(text="ok"),
@@ -92,7 +92,7 @@ def no_backoff_sleep(monkeypatch):
     monkeypatch.setattr(resilience, "_sleep", nosleep)
 
 
-def make_req(tier: str = "fast") -> LLMRequest:
+def make_req(tier: Tier = "fast") -> LLMRequest:
     return LLMRequest(tier=tier, tenant_id="t1", messages=[Message(role="user", content="x")])
 
 
