@@ -65,7 +65,32 @@ def test_write_tool_never_retries() -> None:
 
 def test_read_tool_may_retry_and_write_zero_is_legal() -> None:
     assert _read_tool(retries=2).retries == 2
-    assert _read_tool(side_effect=SideEffect.WRITE).retries == 0
+    assert _read_tool(side_effect=SideEffect.WRITE, risk_exempt=True).retries == 0
+
+
+def test_write_tool_without_policy_rejected() -> None:
+    """C15 类型层：写工具裸奔（无闸门无豁免）连实例都造不出来。"""
+    with pytest.raises(ValueError, match="C15"):
+        _read_tool(side_effect=SideEffect.WRITE)
+
+
+def test_write_tool_with_exemption_is_legal() -> None:
+    assert _read_tool(side_effect=SideEffect.WRITE, risk_exempt=True).risk_exempt is True
+
+
+def test_write_tool_with_policy_is_legal() -> None:
+    t = _read_tool(side_effect=SideEffect.WRITE, risk_policy=lambda args, cfg: True)
+    assert t.risk_policy is not None
+
+
+def test_exempt_with_policy_is_contradiction() -> None:
+    with pytest.raises(ValueError, match="互斥"):
+        _read_tool(side_effect=SideEffect.WRITE, risk_policy=lambda a, c: True, risk_exempt=True)
+
+
+def test_exempt_on_read_tool_rejected() -> None:
+    with pytest.raises(ValueError, match="risk_exempt"):
+        _read_tool(risk_exempt=True)
 
 
 @pytest.mark.parametrize("bad_name", ["", "带中文", "has space", "a" * 65, "semi;colon"])

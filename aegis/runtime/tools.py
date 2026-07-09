@@ -8,11 +8,14 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, get_type_hints
+
+from pydantic import BaseModel, ConfigDict, create_model
 
 
 class SideEffect(StrEnum):
@@ -24,6 +27,10 @@ class SideEffect(StrEnum):
 
 _TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 """OpenAI 兼容 tool schema 对函数名的硬约束（M1.4 的线格式现实），构造期就拦住。"""
+
+
+class ToolRegistrationError(ValueError):
+    """注册期防呆：工具定义的配置 bug 在 import 时就炸——启动时炸好过凌晨三点炸（M0 哲学）。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +75,9 @@ class ToolDef:
     handler: Callable[..., Awaitable[Any]]
     side_effect: SideEffect
     parameters_schema: Mapping[str, Any] = field(default_factory=dict)
+    args_model: type[BaseModel] | None = None  # M2.4 严格校验用；与 parameters_schema 同源生成
     risk_policy: RiskPolicy | None = None
+    risk_exempt: bool = False  # C15 豁免开关：写工具明示"我不需要审批"，留档可审计
     timeout_s: float | None = None
     retries: int = 0
 
@@ -83,3 +92,71 @@ class ToolDef:
             raise ValueError(f"{self.name}: retries 须 ≥0，得到 {self.retries}")
         if self.side_effect is SideEffect.WRITE and self.retries > 0:
             raise ValueError(f"{self.name}: 写工具禁止自动重试（03 §4），retries 须为 0")
+        # ——C15 注册期防呆（放在写禁重试之后，不遮蔽既有不变量的报错）——
+        if self.risk_exempt and self.side_effect is not SideEffect.WRITE:
+            raise ValueError(f"{self.name}: risk_exempt 仅对写工具有意义——读工具本就不过审批")
+        if self.risk_exempt and self.risk_policy is not None:
+            raise ValueError(f"{self.name}: risk_policy 与 risk_exempt 互斥——要么有闸门要么显式豁免")
+        if self.side_effect is SideEffect.WRITE and self.risk_policy is None and not self.risk_exempt:
+            raise ValueError(
+                f"{self.name}: 写工具必须声明 risk_policy 或 risk_exempt=True（C15——沉默的危险按钮不许注册）"
+            )
+
+
+def _build_args_model(fn: Callable[..., Awaitable[Any]], tool_name: str) -> type[BaseModel]:
+    """从函数签名构建参数模型：注解即事实源，schema 与校验模型同源生成。"""
+    sig = inspect.signature(fn)
+    # 全仓开着 from __future__ import annotations，注解在运行时是字符串——必须解析回真类型
+    hints = get_type_hints(fn)
+    params = list(sig.parameters.values())
+    if not params or params[0].name != "ctx" or hints.get("ctx") is not ToolContext:
+        raise ToolRegistrationError(f"{tool_name}: 第一个参数必须是 ctx: ToolContext——身份由运行时注入，模型不可见")
+    fields: dict[str, Any] = {}
+    for p in params[1:]:
+        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            raise ToolRegistrationError(f"{tool_name}: 不支持 *args/**kwargs——JSON Schema 表达不了")
+        if p.name not in hints:
+            raise ToolRegistrationError(f"{tool_name}: 参数 {p.name} 缺类型注解——注解即 schema 的事实源")
+        default = ... if p.default is inspect.Parameter.empty else p.default
+        fields[p.name] = (hints[p.name], default)
+    # extra="forbid"：LLM 幻觉出的多余参数响亮拒绝，静默丢弃=掩盖模型行为异常
+    return create_model(f"{tool_name}_args", __config__=ConfigDict(extra="forbid"), **fields)
+
+
+def tool(
+    *,
+    side_effect: SideEffect,
+    risk_policy: RiskPolicy | None = None,
+    risk_exempt: bool = False,
+    timeout_s: float | None = None,
+    retries: int = 0,
+    name: str | None = None,
+) -> Callable[[Callable[..., Awaitable[Any]]], ToolDef]:
+    """把 async 函数变成 ToolDef：docstring + 类型注解自动生成 schema（03 §4 单一事实源）。
+
+    装饰后模块级名字指向 ToolDef 而非函数（函数在 .handler 里）——工具从此是"说明书"，
+    LLM 看 schema、执行器用 args_model、恢复期读 side_effect，各取所需。
+    一切防呆在 import 时爆炸，统一抛 ToolRegistrationError。
+    """
+
+    def register(fn: Callable[..., Awaitable[Any]]) -> ToolDef:
+        tool_name = name or fn.__name__
+        model = _build_args_model(fn, tool_name)
+        try:
+            return ToolDef(
+                name=tool_name,
+                description=inspect.getdoc(fn) or "",
+                handler=fn,
+                side_effect=side_effect,
+                parameters_schema=model.model_json_schema(),
+                args_model=model,
+                risk_policy=risk_policy,
+                risk_exempt=risk_exempt,
+                timeout_s=timeout_s,
+                retries=retries,
+            )
+        except ValueError as e:
+            # ToolDef 的构造期校验（空 description/C15/坏名字）统一换装成注册期异常
+            raise ToolRegistrationError(str(e)) from e
+
+    return register
