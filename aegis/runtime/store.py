@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Index,
     Integer,
+    Result,
     String,
     Text,
     UniqueConstraint,
@@ -186,6 +187,11 @@ class ProjectionError(RuntimeError):
     它发生在 append 事务内部，会连事件一起回滚：事实与投影同生共死。"""
 
 
+def _rowcount(res: Result[Any]) -> int:
+    """DML 的 execute 运行时恒返回 CursorResult；存根退化为 Result[Any]——存根缝隙在此单点消化。"""
+    return cast(CursorResult[Any], res).rowcount
+
+
 async def _project_message(s: AsyncSession, r: EventRecord, role: str) -> None:
     s.add(
         MessageRecord(
@@ -218,16 +224,12 @@ async def _project_tool_call(s: AsyncSession, r: EventRecord) -> None:
 
 
 async def _finish_invocation(s: AsyncSession, r: EventRecord, **values: object) -> None:
-    res = cast(
-        # DML 的 execute 运行时恒返回 CursorResult；存根在此链上退化为 Result[Any]，cast 记录运行时事实
-        CursorResult[Any],
-        await s.execute(
-            update(ToolInvocationRecord)
-            .where(ToolInvocationRecord.event_id == r.payload["tool_call_id"])
-            .values(finished_at=func.now(), retry_count=r.payload.get("retry_count", 0), **values)
-        ),
+    res = await s.execute(
+        update(ToolInvocationRecord)
+        .where(ToolInvocationRecord.event_id == r.payload["tool_call_id"])
+        .values(finished_at=func.now(), retry_count=r.payload.get("retry_count", 0), **values)
     )
-    if res.rowcount != 1:
+    if _rowcount(res) != 1:
         raise ProjectionError(f"tool_call_id={r.payload['tool_call_id']} 无对应 invocation 行——write-ahead 顺序被破坏")
 
 
@@ -252,13 +254,10 @@ async def _project_tool_error(s: AsyncSession, r: EventRecord) -> None:
 
 
 async def _project_summary(s: AsyncSession, r: EventRecord) -> None:
-    res = cast(
-        CursorResult[Any],
-        await s.execute(
-            update(SessionRecord).where(SessionRecord.id == r.session_id).values(summary=r.payload["summary"])
-        ),
+    res = await s.execute(
+        update(SessionRecord).where(SessionRecord.id == r.session_id).values(summary=r.payload["summary"])
     )
-    if res.rowcount != 1:
+    if _rowcount(res) != 1:
         raise ProjectionError(f"session={r.session_id} 行不存在——摘要不可能先于会话存在")
 
 
@@ -378,3 +377,92 @@ class EventWriter:
         async with self._factory() as s:
             row = (await s.execute(select(EventRecord.id).where(EventRecord.id == event_id))).scalar_one_or_none()
         return row is not None
+
+
+class ApprovalStore:
+    """审批单状态机的原语层：全部翻转走 CAS（C11）——条件进 WHERE，输赢看 rowcount。
+
+    赢家恰一个：双坐席同点、批准与 reaper 到期扫描赛跑，都由行级原子 UPDATE 裁决，
+    输家拿 False/空列表，绝不覆盖赢家。事件写入与 run_state 置位不在此层——
+    那是"先取会话锁再恢复"单入口的事（M2.9）；本层只管 approvals 一张表的真相。
+    """
+
+    def __init__(self, factory: SessionFactory) -> None:
+        self._factory = factory
+
+    async def create(
+        self,
+        *,
+        approval_id: str,
+        session_id: str,
+        tenant_id: str,
+        tool_name: str,
+        args: Mapping[str, Any],
+        expires_at: datetime,
+    ) -> None:
+        """开单（status 默认 pending）。调用方是 M2.9 的风险闸门命中路径。"""
+        async with self._factory() as s:
+            async with s.begin():
+                s.add(
+                    ApprovalRecord(
+                        id=approval_id,
+                        session_id=session_id,
+                        tenant_id=tenant_id,
+                        tool_name=tool_name,
+                        args=dict(args),
+                        expires_at=expires_at,
+                    )
+                )
+
+    async def decide(self, approval_id: str, *, approved: bool, operator_id: str) -> bool:
+        """坐席决策：pending 且未过期才翻转（C7 fail-closed）——过期单一律拒绝，归宿只有 reaper。
+
+        时钟用 func.now()（DB 时钟）：与 expires_at 的写入时钟同源，无应用侧漂移。
+        """
+        target = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(ApprovalRecord)
+                    .where(
+                        ApprovalRecord.id == approval_id,
+                        ApprovalRecord.status == ApprovalStatus.PENDING.value,
+                        ApprovalRecord.expires_at > func.now(),
+                    )
+                    .values(status=target.value, operator_id=operator_id, decided_at=func.now())
+                )
+        return _rowcount(res) == 1
+
+    async def cancel(self, approval_id: str) -> bool:
+        """用户撤回：pending 即可翻转，不查过期——撤回已到期未清扫的单无害且语义更干净。"""
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(ApprovalRecord)
+                    .where(
+                        ApprovalRecord.id == approval_id,
+                        ApprovalRecord.status == ApprovalStatus.PENDING.value,
+                    )
+                    .values(status=ApprovalStatus.CANCELLED.value, decided_at=func.now())
+                )
+        return _rowcount(res) == 1
+
+    async def expire_due(self, *, now: datetime | None = None) -> list[str]:
+        """把 pending 且已到期的单批量翻 expired，返回翻转的单号（reaper 调度随 M3.9 实装）。
+
+        now 可注入（C7 的可注入时钟）：单测不必等真实时钟走到 expires_at；
+        生产不传 → 落回 func.now()，与 decide 同一口钟。
+        """
+        cutoff = func.now() if now is None else now
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(ApprovalRecord)
+                    .where(
+                        ApprovalRecord.status == ApprovalStatus.PENDING.value,
+                        ApprovalRecord.expires_at <= cutoff,
+                    )
+                    .values(status=ApprovalStatus.EXPIRED.value, decided_at=func.now())
+                    .returning(ApprovalRecord.id)
+                )
+        return list(res.scalars().all())
