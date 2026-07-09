@@ -39,7 +39,8 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
 python_version = "3.13"
-check_untyped_defs = true      # 起步先温和；M2 核心模块再逐步收紧到 strict
+check_untyped_defs = true
+explicit_package_bases = true   # ← 新增：按目录路径推导模块名，允许多目录同名文件（如两个 conftest.py）
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

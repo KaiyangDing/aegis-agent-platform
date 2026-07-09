@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, get_type_hints
@@ -160,3 +160,31 @@ def tool(
             raise ToolRegistrationError(str(e)) from e
 
     return register
+
+
+class ToolRegistry:
+    """工具注册表：把一组说明书排上架，自动建 dispatch 表（name → ToolDef），重名即拒。
+
+    不做自动发现——注入是唯一入口（依赖倒置）：同一个运行时，生产喂真工具、
+    回放喂演示工具集，换武器不换枪手。dict 保插入序 = specs() 顺序确定
+    （工具顺序进 LLMRequest，是回放确定性的一环）。
+    """
+
+    def __init__(self, tools: Iterable[ToolDef] = ()) -> None:
+        self._by_name: dict[str, ToolDef] = {}
+        for t in tools:
+            self.add(t)
+
+    def add(self, t: ToolDef) -> None:
+        if t.name in self._by_name:
+            raise ToolRegistrationError(f"工具名重复：{t.name}——dispatch 表无法唯一路由")
+        self._by_name[t.name] = t
+
+    def get(self, name: str) -> ToolDef | None:
+        """按名字取说明书。查不到返回 None 而非抛错——模型幻觉工具名是运行期常态，
+        怎么处置（回填纠错、闸门 #5 计数）是 M2.7 循环的政策，注册表只管查表。"""
+        return self._by_name.get(name)
+
+    def specs(self) -> tuple[ToolDef, ...]:
+        """产出喂给 AgentSpec.tools 的元组（冻结注入面）。"""
+        return tuple(self._by_name.values())
