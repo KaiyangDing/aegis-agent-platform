@@ -77,9 +77,7 @@ async def complete_with_retry(
                 # 挂起统一翻译成 ProviderTimeoutError：与 5xx 走同一条
                 # 重试/记熔断账/换路流水线——评审 C1 要求的"挂起可被处理"就在这一行
                 await stream.aclose()  # 显式归还悬挂中的 httpx 连接，不等 GC
-                raise ProviderTimeoutError(
-                    provider.name, f"首块超时 >{first_wait:.1f}s（上游挂起）"
-                ) from e
+                raise ProviderTimeoutError(provider.name, f"首块超时 >{first_wait:.1f}s（上游挂起）") from e
         except StopAsyncIteration:
             return  # 空流：协议不变量下不该发生，防御性处理
         except RETRYABLE_ERRORS as e:

@@ -96,9 +96,7 @@ def make_req(tier: Tier = "fast") -> LLMRequest:
     return LLMRequest(tier=tier, tenant_id="t1", messages=[Message(role="user", content="x")])
 
 
-def make_gw(
-    providers: list, breaker=None, limiter=None, **kw
-) -> tuple[LLMGateway, StubBreaker, StubLimiter]:
+def make_gw(providers: list, breaker=None, limiter=None, **kw) -> tuple[LLMGateway, StubBreaker, StubLimiter]:
     breaker = breaker or StubBreaker()
     limiter = limiter or StubLimiter()
     gw = LLMGateway(
@@ -425,9 +423,7 @@ async def test_success_records_usage_with_provider():
 
 async def test_cache_hit_records_zero_cost_usage():
     meter = StubMeter()
-    gw, _, _ = make_gw(
-        [FakeProvider("p1", [OK_CHUNKS])], cache=StubCache(hit=OK_CHUNKS), meter=meter
-    )
+    gw, _, _ = make_gw([FakeProvider("p1", [OK_CHUNKS])], cache=StubCache(hit=OK_CHUNKS), meter=meter)
     await collect(gw)
     provider, usage = meter.records[0]
     assert provider == "cache"
@@ -526,9 +522,7 @@ async def test_request_budget_gate_blocks_oversized_prompt():
     """单请求闸门：超长 prompt 在碰任何配额之前被明确拒绝（§10.1 #1）。"""
     p1 = FakeProvider("p1", [OK_CHUNKS])
     gw, _, limiter = make_gw([p1], request_token_budget=10)
-    req = LLMRequest(
-        tier="fast", tenant_id="t1", messages=[Message(role="user", content="验" * 50)]
-    )
+    req = LLMRequest(tier="fast", tenant_id="t1", messages=[Message(role="user", content="验" * 50)])
     with pytest.raises(BudgetExceeded, match="单请求"):
         [c async for c in gw.complete(req)]
     assert p1.calls == 0

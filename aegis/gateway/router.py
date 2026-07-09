@@ -59,9 +59,7 @@ class BreakerLike(Protocol):
 
 
 class LimiterLike(Protocol):
-    async def wait_take(
-        self, scope: str, rate: float, capacity: float, *, max_wait: float = 10.0, cost: float = 1.0
-    ) -> bool: ...
+    async def wait_take(self, scope: str, rate: float, capacity: float, *, max_wait: float = 10.0, cost: float = 1.0) -> bool: ...
 
 
 class CacheLike(Protocol):
@@ -82,9 +80,7 @@ class Candidate:
     model: str
 
 
-def parse_routes(
-    raw: dict[str, list[str]], known_providers: set[str]
-) -> dict[str, list[Candidate]]:
+def parse_routes(raw: dict[str, list[str]], known_providers: set[str]) -> dict[str, list[Candidate]]:
     """启动即校验：路由配置错误要在进程启动时炸，不许拖到运行时。"""
     routes: dict[str, list[Candidate]] = {}
     for tier, entries in raw.items():
@@ -133,9 +129,7 @@ class FaultInjector:
     - midstream：吐出首块后死掉（触发半截语义 GatewayStreamInterrupted）。
     """
 
-    def __init__(
-        self, inner: Provider, rate: float, *, mode: FaultMode = "error", hang_s: float = 120.0
-    ):
+    def __init__(self, inner: Provider, rate: float, *, mode: FaultMode = "error", hang_s: float = 120.0):
         self._inner = inner
         self._rate = rate
         self._mode = mode
@@ -233,20 +227,14 @@ class LLMGateway:
                 logger.warning("预算读取失败，本次放行（fail-open）", exc_info=True)
             else:
                 if spent >= self._monthly_token_budget:
-                    raise BudgetExceeded(
-                        f"租户 {req.tenant_id} 本月已用 {spent} token，"
-                        f"预算 {self._monthly_token_budget}"
-                    )
+                    raise BudgetExceeded(f"租户 {req.tenant_id} 本月已用 {spent} token，预算 {self._monthly_token_budget}")
 
         # 单请求预算闸门（三级预算的 L1 级，§10.1 #1）：挡超长上下文炸弹。
         # 在租户限流之前——被拒的请求不该消耗配额；估算口径 ±15%（00 §2.2）
         if self._request_token_budget > 0:
             est = estimate_request_tokens(req)
             if est > self._request_token_budget:
-                raise BudgetExceeded(
-                    f"单请求估算 {est} token，超过预算 "
-                    f"{self._request_token_budget}（估算口径 00 §2.2）"
-                )
+                raise BudgetExceeded(f"单请求估算 {est} token，超过预算 {self._request_token_budget}（估算口径 00 §2.2）")
 
         # 红线二：租户配额在候选环外——换供应商换不掉租户身份
         ok = await self._limiter.wait_take(
@@ -264,10 +252,7 @@ class LLMGateway:
         rejections = 0  # 确定性拒绝（Auth/BadRequest）计数
         transients = 0  # 暂时性因素计数：熔断拒/限流拒/5xx/超时/429
         for cand in candidates:
-            if (
-                deadline is not None
-                and deadline - time.monotonic() < self._retry_policy.min_attempt_budget
-            ):
+            if deadline is not None and deadline - time.monotonic() < self._retry_policy.min_attempt_budget:
                 budget_out = True  # 剩余预算连一次像样的尝试都开不起：停止换路
                 break
             provider = self._providers[cand.provider]
@@ -299,9 +284,7 @@ class LLMGateway:
             buffer: list[LLMChunk] = []
             usage_seen: UsageChunk | None = None
             try:
-                async with aclosing(
-                    complete_with_retry(target, req, cand.model, policy, deadline=deadline)
-                ) as rs:
+                async with aclosing(complete_with_retry(target, req, cand.model, policy, deadline=deadline)) as rs:
                     async for chunk in rs:
                         yielded = True
                         if isinstance(chunk, UsageChunk):
@@ -343,14 +326,10 @@ class LLMGateway:
                 last_error = e  # 本家的配置/转换问题，别家未必过不去
 
         if budget_out:
-            raise GatewayExhausted(
-                f"档位 {req.tier} 首块预算 {req.deadline_s}s 耗尽（候选链未走完）"
-            ) from last_error
+            raise GatewayExhausted(f"档位 {req.tier} 首块预算 {req.deadline_s}s 耗尽（候选链未走完）") from last_error
 
         if rejections > 0 and transients == 0:
-            raise GatewayRejected(
-                f"档位 {req.tier} 全部候选均被确定性拒绝——检查 API key 配置与请求转换"
-            ) from last_error
+            raise GatewayRejected(f"档位 {req.tier} 全部候选均被确定性拒绝——检查 API key 配置与请求转换") from last_error
 
         raise GatewayExhausted(f"档位 {req.tier} 的所有候选均不可用") from last_error
 

@@ -46,9 +46,7 @@ class UsageRecord(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer)
     cached: Mapped[bool] = mapped_column(Boolean, default=False)  # 缓存回放：记录但零成本
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 6), default=Decimal("0"))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (Index("ix_usage_tenant_created", "tenant_id", "created_at"),)
 
@@ -73,9 +71,7 @@ def compute_cost(
         logger.warning("模型 %s 不在价目表中，本行成本记 0（请尽快补配置）", model)
         return Decimal("0")
     prompt_price, completion_price = pair
-    return (
-        Decimal(prompt_tokens) * prompt_price + Decimal(completion_tokens) * completion_price
-    ) / Decimal(1000)
+    return (Decimal(prompt_tokens) * prompt_price + Decimal(completion_tokens) * completion_price) / Decimal(1000)
 
 
 class MeteringRecorder:
@@ -120,9 +116,7 @@ class MeteringRecorder:
         月初由数据库端 date_trunc 计算：账本认谁的钟，预算就认谁的钟。
         查询走 (tenant_id, created_at) 复合索引——M1.11a 修那条路就是为了今天。
         """
-        stmt = select(
-            func.coalesce(func.sum(UsageRecord.prompt_tokens + UsageRecord.completion_tokens), 0)
-        ).where(
+        stmt = select(func.coalesce(func.sum(UsageRecord.prompt_tokens + UsageRecord.completion_tokens), 0)).where(
             UsageRecord.tenant_id == tenant_id,
             UsageRecord.created_at >= func.date_trunc("month", func.now()),
             UsageRecord.cached.is_(False),

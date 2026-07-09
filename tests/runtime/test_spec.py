@@ -11,7 +11,15 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from aegis.runtime.spec import TERMINATION_GATES, ContextConfig, LoopPolicy, TerminationReason
+from aegis.runtime.spec import (
+    TERMINATION_GATES,
+    AgentSpec,
+    ContextConfig,
+    LoopPolicy,
+    SubAgentPolicy,
+    TerminationReason,
+)
+from aegis.runtime.tools import SideEffect, ToolDef
 
 
 def test_termination_reason_values_are_stable() -> None:
@@ -113,3 +121,43 @@ def test_context_config_allows_zero_optional_layers() -> None:
 
 def test_context_config_input_total() -> None:
     assert ContextConfig().input_total == 12_500
+
+
+def test_sub_agent_policy_is_v1_locked() -> None:
+    """ADR-002：v1 恒 DISABLED。v2 想加成员，先让这条红、重新过 ADR。"""
+    assert [p.value for p in SubAgentPolicy] == ["disabled"]
+
+
+def test_agent_spec_defaults() -> None:
+    spec = AgentSpec(system_prompt="你是云杉电商的客服助手。")
+    assert spec.tools == ()
+    assert spec.policy == LoopPolicy()
+    assert spec.context_config == ContextConfig()
+    assert spec.model_tier == "standard"
+    assert spec.sub_agent_policy is SubAgentPolicy.DISABLED
+    assert dict(spec.tenant_config) == {}
+
+
+def test_agent_spec_is_frozen() -> None:
+    spec = AgentSpec(system_prompt="x")
+    with pytest.raises(FrozenInstanceError):
+        spec.model_tier = "fast"  # type: ignore[misc]
+
+
+def test_agent_spec_rejects_blank_prompt() -> None:
+    with pytest.raises(ValueError, match="system_prompt"):
+        AgentSpec(system_prompt="   ")
+
+
+def test_agent_spec_rejects_unknown_tier() -> None:
+    """Literal 只防静态；L3 从租户配置读出的裸字符串靠这道运行时防线。"""
+    with pytest.raises(ValueError, match="model_tier"):
+        AgentSpec(system_prompt="x", model_tier="turbo")  # type: ignore[arg-type]
+
+
+def test_agent_spec_rejects_duplicate_tool_names() -> None:
+    async def _h() -> None: ...
+
+    dup = ToolDef(name="dup", description="占位", handler=_h, side_effect=SideEffect.READ)
+    with pytest.raises(ValueError, match="dup"):
+        AgentSpec(system_prompt="x", tools=(dup, dup))

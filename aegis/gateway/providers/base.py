@@ -90,9 +90,7 @@ def raise_for_status(provider_name: str, resp: httpx.Response) -> None:
         return
     snippet = sanitize_error_text(resp.text)  # 截断 + key 打码：够排障，不泄密
     if resp.status_code == 429:
-        raise RateLimitedError(
-            provider_name, snippet, retry_after=parse_retry_after(resp.headers.get("Retry-After"))
-        )
+        raise RateLimitedError(provider_name, snippet, retry_after=parse_retry_after(resp.headers.get("Retry-After")))
     if resp.status_code == 408:
         raise ProviderTimeoutError(provider_name, f"HTTP 408: {snippet}")
     if resp.status_code in (401, 403):

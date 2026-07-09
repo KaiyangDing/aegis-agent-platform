@@ -83,9 +83,7 @@ class RateLimiter:
         self._probe_interval = probe_interval
         self._next_probe = 0.0  # monotonic 时刻：降级期内下一次允许探测 Redis 的时间
 
-    async def try_take(
-        self, scope: str, rate: float, capacity: float, cost: float = 1.0
-    ) -> tuple[bool, float]:
+    async def try_take(self, scope: str, rate: float, capacity: float, cost: float = 1.0) -> tuple[bool, float]:
         """立即尝试取令牌。Redis 不可用时降级为进程内桶（配额=全局/副本数）。
 
         降级是粘滞的：降级期内不再每次调用都撞 Redis（连接失败在 redis-py 8
@@ -95,15 +93,11 @@ class RateLimiter:
         if self._degraded:
             now = time.monotonic()
             if now < self._next_probe:
-                return self._local_take(
-                    scope, rate / self._replicas, capacity / self._replicas, cost
-                )
+                return self._local_take(scope, rate / self._replicas, capacity / self._replicas, cost)
             self._next_probe = now + self._probe_interval  # 领探针：检查与写入之间
             #                     无 await，事件循环内天然互斥——并发者继续走本地桶
         try:
-            allowed, wait = await self._take(
-                keys=[f"aegis:rl:{scope}"], args=[rate, capacity, cost]
-            )
+            allowed, wait = await self._take(keys=[f"aegis:rl:{scope}"], args=[rate, capacity, cost])
         except Exception:
             if not self._degraded:
                 logger.warning(
@@ -120,9 +114,7 @@ class RateLimiter:
             self._local.clear()  # 旧桶作废：下次再降级时开局满桶，与 Lua 冷启动语义一致
         return bool(int(allowed)), float(wait)
 
-    def _local_take(
-        self, scope: str, rate: float, capacity: float, cost: float = 1.0
-    ) -> tuple[bool, float]:
+    def _local_take(self, scope: str, rate: float, capacity: float, cost: float = 1.0) -> tuple[bool, float]:
         now = time.monotonic()
         bucket = self._local.get(scope)
         if bucket is None:

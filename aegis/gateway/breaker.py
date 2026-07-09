@@ -146,8 +146,7 @@ class CircuitBreaker:
     def _note_degraded(self) -> None:
         if not self._degraded:
             logger.warning(
-                "Redis 熔断状态不可用，降级为本地计数（fail-open 基调；"
-                "'全集群唯一探针'等承诺在降级期间失效）",
+                "Redis 熔断状态不可用，降级为本地计数（fail-open 基调；'全集群唯一探针'等承诺在降级期间失效）",
                 exc_info=True,
             )
             self._degraded = True

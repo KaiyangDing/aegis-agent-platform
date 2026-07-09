@@ -40,9 +40,7 @@ async def dead_r():
     await client.aclose()
 
 
-TEST_DATABASE_URL = os.environ.get(
-    "AEGIS_TEST_DATABASE_URL", "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis"
-)
+TEST_DATABASE_URL = os.environ.get("AEGIS_TEST_DATABASE_URL", "postgresql+asyncpg://aegis:aegis@localhost:5432/aegis")
 
 
 @pytest.fixture
@@ -77,9 +75,7 @@ def db_session_factory(db_conn):
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    return async_sessionmaker(
-        bind=db_conn, join_transaction_mode="create_savepoint", expire_on_commit=False
-    )
+    return async_sessionmaker(bind=db_conn, join_transaction_mode="create_savepoint", expire_on_commit=False)
 
 
 @pytest.fixture

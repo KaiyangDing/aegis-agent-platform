@@ -56,9 +56,7 @@ def make_provider(api_key: str = "sk-ant-test") -> AnthropicProvider:
 
 
 def make_req() -> LLMRequest:
-    return LLMRequest(
-        tier="standard", tenant_id="t1", messages=[Message(role="user", content="你好")]
-    )
+    return LLMRequest(tier="standard", tenant_id="t1", messages=[Message(role="user", content="你好")])
 
 
 async def collect(provider: AnthropicProvider, req: LLMRequest) -> list:
@@ -67,9 +65,7 @@ async def collect(provider: AnthropicProvider, req: LLMRequest) -> list:
 
 @respx.mock
 async def test_payload_system_extracted_and_auth_headers():
-    route = respx.post(URL).mock(
-        return_value=httpx.Response(200, content=sse(MSG_STOP), headers=SSE_HEADERS)
-    )
+    route = respx.post(URL).mock(return_value=httpx.Response(200, content=sse(MSG_STOP), headers=SSE_HEADERS))
     req = LLMRequest(
         tier="standard",
         tenant_id="t1",
@@ -90,9 +86,7 @@ async def test_payload_system_extracted_and_auth_headers():
 
 @respx.mock
 async def test_payload_tools_use_input_schema():
-    route = respx.post(URL).mock(
-        return_value=httpx.Response(200, content=sse(MSG_STOP), headers=SSE_HEADERS)
-    )
+    route = respx.post(URL).mock(return_value=httpx.Response(200, content=sse(MSG_STOP), headers=SSE_HEADERS))
     req = LLMRequest(
         tier="standard",
         tenant_id="t1",
@@ -101,16 +95,12 @@ async def test_payload_tools_use_input_schema():
     )
     await collect(make_provider(), req)
     sent = json.loads(route.calls.last.request.content)
-    assert sent["tools"] == [
-        {"name": "get_weather", "description": "查天气", "input_schema": {"type": "object"}}
-    ]
+    assert sent["tools"] == [{"name": "get_weather", "description": "查天气", "input_schema": {"type": "object"}}]
 
 
 @respx.mock
 async def test_payload_tool_round_history_converted():
-    route = respx.post(URL).mock(
-        return_value=httpx.Response(200, content=sse(MSG_STOP), headers=SSE_HEADERS)
-    )
+    route = respx.post(URL).mock(return_value=httpx.Response(200, content=sse(MSG_STOP), headers=SSE_HEADERS))
     req = LLMRequest(
         tier="standard",
         tenant_id="t1",
@@ -118,9 +108,7 @@ async def test_payload_tool_round_history_converted():
             Message(role="user", content="查订单"),
             Message(
                 role="assistant",
-                tool_calls=[
-                    ToolCall(id="toolu_1", name="order_query", arguments_json='{"order_id":"A1"}')
-                ],
+                tool_calls=[ToolCall(id="toolu_1", name="order_query", arguments_json='{"order_id":"A1"}')],
             ),
             Message(role="tool", tool_call_id="toolu_1", content='{"status":"shipped"}'),
         ],
@@ -140,9 +128,7 @@ async def test_payload_tool_round_history_converted():
     }
     assert sent["messages"][2] == {
         "role": "user",
-        "content": [
-            {"type": "tool_result", "tool_use_id": "toolu_1", "content": '{"status":"shipped"}'}
-        ],
+        "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": '{"status":"shipped"}'}],
     }
 
 
@@ -204,9 +190,7 @@ async def test_stream_tool_use_assembled_from_partial_json():
     respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
     chunks = await collect(make_provider(), make_req())
     assert chunks == [
-        ToolCallChunk(
-            tool_call=ToolCall(id="toolu_9", name="get_weather", arguments_json='{"city":"杭州"}')
-        ),
+        ToolCallChunk(tool_call=ToolCall(id="toolu_9", name="get_weather", arguments_json='{"city":"杭州"}')),
         UsageChunk(model="claude-sonnet-4", prompt_tokens=25, completion_tokens=30),
         StopChunk(reason="tool_calls"),  # tool_use → 统一协议的 tool_calls
     ]
@@ -233,9 +217,7 @@ async def test_ping_and_unknown_events_ignored():
 
 @respx.mock
 async def test_429_via_shared_raise_for_status():
-    respx.post(URL).mock(
-        return_value=httpx.Response(429, headers={"Retry-After": "2"}, text="busy")
-    )
+    respx.post(URL).mock(return_value=httpx.Response(429, headers={"Retry-After": "2"}, text="busy"))
     with pytest.raises(RateLimitedError) as ei:
         await collect(make_provider(), make_req())
     assert ei.value.retry_after == 2.0

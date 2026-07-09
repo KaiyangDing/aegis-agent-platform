@@ -1,0 +1,90 @@
+"""M2.1 交付②：工具契约测试——身份注入、读写标记、"写不重试"不变量。"""
+
+from __future__ import annotations
+
+from dataclasses import FrozenInstanceError, replace
+
+import pytest
+
+from aegis.runtime.tools import SideEffect, ToolContext, ToolDef
+
+
+async def _echo(ctx: ToolContext, text: str) -> str:
+    return text
+
+
+def _read_tool(**overrides: object) -> ToolDef:
+    """合法读工具基线，各测试按需覆写单个字段。"""
+    base = ToolDef(
+        name="order_query",
+        description="按订单号查询订单状态。",
+        handler=_echo,
+        side_effect=SideEffect.READ,
+    )
+    return replace(base, **overrides)  # type: ignore[arg-type]
+
+
+def test_side_effect_values_are_stable() -> None:
+    """值将进事件/审计 payload 与恢复期判定，快照钉死。"""
+    assert {s.value for s in SideEffect} == {"read", "write"}
+
+
+def test_tool_context_fields_and_frozen() -> None:
+    ctx = ToolContext(tenant_id="t-a", user_id="u-1", session_id="s-1", run_id="r-1", tool_call_id="evt-1")
+    assert ctx.tool_call_id == "evt-1"
+    with pytest.raises(FrozenInstanceError):
+        ctx.user_id = "u-2"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("blank", ["tenant_id", "user_id", "session_id", "run_id", "tool_call_id"])
+def test_tool_context_rejects_blank_ids(blank: str) -> None:
+    kwargs = dict(tenant_id="t", user_id="u", session_id="s", run_id="r", tool_call_id="e")
+    kwargs[blank] = ""
+    with pytest.raises(ValueError, match=blank):
+        ToolContext(**kwargs)
+
+
+def test_tool_def_defaults() -> None:
+    t = _read_tool()
+    assert t.risk_policy is None
+    assert t.timeout_s is None  # None = 继承 LoopPolicy.tool_step_timeout_s
+    assert t.retries == 0
+    assert dict(t.parameters_schema) == {}
+
+
+def test_tool_def_is_frozen() -> None:
+    with pytest.raises(FrozenInstanceError):
+        _read_tool().retries = 5  # type: ignore[misc]
+
+
+def test_write_tool_never_retries() -> None:
+    """03 §4 ⑤：写操作绝不自动重试——幂等靠 write-ahead 键，不靠再试一次。"""
+    with pytest.raises(ValueError, match="禁止自动重试"):
+        _read_tool(side_effect=SideEffect.WRITE, retries=1)
+
+
+def test_read_tool_may_retry_and_write_zero_is_legal() -> None:
+    assert _read_tool(retries=2).retries == 2
+    assert _read_tool(side_effect=SideEffect.WRITE).retries == 0
+
+
+@pytest.mark.parametrize("bad_name", ["", "带中文", "has space", "a" * 65, "semi;colon"])
+def test_tool_def_rejects_bad_names(bad_name: str) -> None:
+    with pytest.raises(ValueError, match="工具名"):
+        _read_tool(name=bad_name)
+
+
+def test_tool_def_rejects_blank_description() -> None:
+    with pytest.raises(ValueError, match="description"):
+        _read_tool(description="   ")
+
+
+@pytest.mark.parametrize("bad", [0.0, -5.0])
+def test_tool_def_rejects_bad_timeout(bad: float) -> None:
+    with pytest.raises(ValueError, match="timeout_s"):
+        _read_tool(timeout_s=bad)
+
+
+def test_tool_def_rejects_negative_retries() -> None:
+    with pytest.raises(ValueError, match="retries"):
+        _read_tool(retries=-1)

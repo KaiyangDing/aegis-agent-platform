@@ -1,15 +1,21 @@
 """L2 运行时注入面类型：终止原因 + 循环策略 + 上下文预算（03 §1/§2/§3 的类型落地）。
 
 运行时对"客服"一无所知——prompt/工具/策略/租户配置全部由 L3 经这些类型注入。
-M2.1 分三次交付：本文件是交付①；AgentSpec 与工具契约随交付②补齐。
+M2.1 分三次交付：本文件承载交付①（终止原因/策略/预算）与交付②的 AgentSpec；
+工具契约在 tools.py；事件类型与 AgentRuntime 门面随交付③。
 校验强度跟着信任边界走：这里是受信代码的配置，用 frozen dataclass + 防呆即可；
 LLM 生成的工具参数才需要 pydantic 严校验（03 §4，M2.4）。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any, get_args
+
+from aegis.gateway.schema import Tier
+from aegis.runtime.tools import ToolDef
 
 
 class TerminationReason(StrEnum):
@@ -103,10 +109,43 @@ class ContextConfig:
     @property
     def input_total(self) -> int:
         """输入侧五层合计（不含输出余量），默认 12_500——M2.5 编译器与 M2.7 对账用。"""
-        return (
-            self.system_budget
-            + self.memory_budget
-            + self.history_budget
-            + self.retrieval_budget
-            + self.tool_results_budget
-        )
+        return self.system_budget + self.memory_budget + self.history_budget + self.retrieval_budget + self.tool_results_budget
+
+
+class SubAgentPolicy(StrEnum):
+    """v1 恒 DISABLED——为 ADR-002"只读子 Agent 并行调查"（v2）预留的接口位。
+
+    只有一个成员是有意的：测试钉死 len==1，v2 想加成员先让测试红、重过 ADR-002。
+    """
+
+    DISABLED = "disabled"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSpec:
+    """L3 注入运行时的全部内容（03 §1）——运行时对"客服"一无所知。
+
+    tools 用 tuple 不用 list：注入面是冻结的（一次 run 内不可变，回放一致性依赖）。
+    tenant_config 对运行时不透明：只透传给 risk_policy 等注入点，解释权在 L3——
+    依赖倒置的落点，运行时不知道 approval_threshold 是什么。
+    model_tier 复用 L1 的 Tier 字面量（gateway/schema.py）：档位语义两层同一事实源；
+    Literal 只防静态，get_args 运行时防线拦 L3 从配置读出的裸字符串。
+    """
+
+    system_prompt: str
+    tools: tuple[ToolDef, ...] = ()
+    policy: LoopPolicy = LoopPolicy()
+    context_config: ContextConfig = ContextConfig()
+    model_tier: Tier = "standard"
+    sub_agent_policy: SubAgentPolicy = SubAgentPolicy.DISABLED
+    tenant_config: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.system_prompt.strip():
+            raise ValueError("system_prompt 不许为空——没有平台规则的 Agent 不许起跑")
+        if self.model_tier not in get_args(Tier):
+            raise ValueError(f"model_tier 须为 {get_args(Tier)} 之一，得到 {self.model_tier!r}")
+        names = [t.name for t in self.tools]
+        if len(names) != len(set(names)):
+            dupes = sorted({n for n in names if names.count(n) > 1})
+            raise ValueError(f"工具名重复：{dupes}——dispatch 表将无法唯一路由")

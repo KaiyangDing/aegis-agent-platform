@@ -27,11 +27,7 @@ async def test_usage_record_roundtrip(db_session):
     await db_session.refresh(rec)  # 回读服务端填充的列（created_at 是数据库的钟给的）
     assert rec.id is not None
     assert rec.created_at is not None
-    got = (
-        await db_session.execute(
-            select(UsageRecord).where(UsageRecord.request_id == "req-roundtrip")
-        )
-    ).scalar_one()
+    got = (await db_session.execute(select(UsageRecord).where(UsageRecord.request_id == "req-roundtrip"))).scalar_one()
     assert got.cost == Decimal("0.000123")  # Decimal 无损往返——用 float 这里会开始出鬼
 
 
@@ -73,15 +69,11 @@ def make_req(**kw) -> LLMRequest:
 async def test_recorder_writes_priced_row(db_session_factory):
     rec = MeteringRecorder(db_session_factory, PRICES)
     req = make_req(session_id="s1")
-    await rec.record(
-        req, "bailian", UsageChunk(model="qwen-flash", prompt_tokens=1000, completion_tokens=2000)
-    )
+    await rec.record(req, "bailian", UsageChunk(model="qwen-flash", prompt_tokens=1000, completion_tokens=2000))
     async with db_session_factory() as s:
         from sqlalchemy import select
 
-        row = (
-            await s.execute(select(UsageRecord).where(UsageRecord.request_id == req.request_id))
-        ).scalar_one()
+        row = (await s.execute(select(UsageRecord).where(UsageRecord.request_id == req.request_id))).scalar_one()
     assert row.cost == Decimal("0.00315")
     assert (row.provider, row.tier, row.session_id) == ("bailian", "fast", "s1")
 
@@ -97,9 +89,7 @@ async def test_recorder_cached_row_costs_zero(db_session_factory):
     async with db_session_factory() as s:
         from sqlalchemy import select
 
-        row = (
-            await s.execute(select(UsageRecord).where(UsageRecord.request_id == req.request_id))
-        ).scalar_one()
+        row = (await s.execute(select(UsageRecord).where(UsageRecord.request_id == req.request_id))).scalar_one()
     assert row.cost == Decimal("0")
     assert row.cached is True
 

@@ -18,12 +18,8 @@ from aegis.gateway.router import GatewayLimits, LLMGateway, parse_routes
 def build_gateway() -> LLMGateway:
     s = get_settings()
     providers: dict[str, Provider] = {
-        "bailian": OpenAICompatProvider(
-            "bailian", s.dashscope_base_url, s.dashscope_api_key.get_secret_value()
-        ),
-        "anthropic": AnthropicProvider(
-            "anthropic", s.anthropic_base_url, s.anthropic_api_key.get_secret_value()
-        ),
+        "bailian": OpenAICompatProvider("bailian", s.dashscope_base_url, s.dashscope_api_key.get_secret_value()),
+        "anthropic": AnthropicProvider("anthropic", s.anthropic_base_url, s.anthropic_api_key.get_secret_value()),
     }
     redis = get_redis()
     return LLMGateway(
@@ -31,9 +27,7 @@ def build_gateway() -> LLMGateway:
         routes=parse_routes(s.model_routes, set(providers)),
         breaker=CircuitBreaker(redis),
         limiter=RateLimiter(redis, replicas=s.replica_count),
-        cache=ExactCache(redis, ttl_seconds=s.cache_ttl_seconds)
-        if s.cache_ttl_seconds > 0
-        else None,
+        cache=ExactCache(redis, ttl_seconds=s.cache_ttl_seconds) if s.cache_ttl_seconds > 0 else None,
         limits=GatewayLimits(
             provider_rate=s.provider_rate,
             provider_burst=s.provider_burst,

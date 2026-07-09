@@ -64,9 +64,7 @@ async def collect(provider: OpenAICompatProvider, req: LLMRequest) -> list:
 
 @respx.mock
 async def test_payload_requests_streaming_with_usage():
-    route = respx.post(URL).mock(
-        return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS)
-    )
+    route = respx.post(URL).mock(return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS))
     await collect(make_provider(), make_req())
     sent = json.loads(route.calls.last.request.content)
     assert sent["stream"] is True
@@ -140,9 +138,7 @@ class ExplodingStream(httpx.AsyncByteStream):
 
 @respx.mock
 async def test_midstream_disconnect_after_partial_output():
-    respx.post(URL).mock(
-        return_value=httpx.Response(200, stream=ExplodingStream(), headers=SSE_HEADERS)
-    )
+    respx.post(URL).mock(return_value=httpx.Response(200, stream=ExplodingStream(), headers=SSE_HEADERS))
     got = []
     with pytest.raises(ProviderServerError):
         async for c in make_provider().complete(make_req(), model="qwen-flash"):
@@ -153,9 +149,7 @@ async def test_midstream_disconnect_after_partial_output():
 
 @respx.mock
 async def test_429_maps_to_rate_limited_with_retry_after():
-    respx.post(URL).mock(
-        return_value=httpx.Response(429, headers={"Retry-After": "3"}, text="busy")
-    )
+    respx.post(URL).mock(return_value=httpx.Response(429, headers={"Retry-After": "3"}, text="busy"))
     with pytest.raises(RateLimitedError) as ei:
         await collect(make_provider(), make_req())
     assert ei.value.retry_after == 3.0
@@ -203,9 +197,7 @@ WEATHER_TOOL = ToolSpec(
 )
 
 
-def tc_frag(
-    index: int, *, id: str | None = None, name: str | None = None, args: str | None = None
-) -> dict:
+def tc_frag(index: int, *, id: str | None = None, name: str | None = None, args: str | None = None) -> dict:
     fn: dict = {}
     if name is not None:
         fn["name"] = name
@@ -223,9 +215,7 @@ def tool_event(*frags: dict) -> dict:
 
 @respx.mock
 async def test_tools_spec_mapped_into_payload():
-    route = respx.post(URL).mock(
-        return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS)
-    )
+    route = respx.post(URL).mock(return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS))
     req = LLMRequest(
         tier="fast",
         tenant_id="t1",
@@ -248,9 +238,7 @@ async def test_tools_spec_mapped_into_payload():
 
 @respx.mock
 async def test_tool_round_history_mapped_to_wire():
-    route = respx.post(URL).mock(
-        return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS)
-    )
+    route = respx.post(URL).mock(return_value=httpx.Response(200, content=sse("[DONE]"), headers=SSE_HEADERS))
     req = LLMRequest(
         tier="fast",
         tenant_id="t1",
@@ -258,9 +246,7 @@ async def test_tool_round_history_mapped_to_wire():
             Message(role="user", content="查订单"),
             Message(
                 role="assistant",
-                tool_calls=[
-                    ToolCall(id="call_7", name="order_query", arguments_json='{"order_id":"A1"}')
-                ],
+                tool_calls=[ToolCall(id="call_7", name="order_query", arguments_json='{"order_id":"A1"}')],
             ),
             Message(role="tool", tool_call_id="call_7", content='{"status":"shipped"}'),
         ],
@@ -297,9 +283,7 @@ async def test_streaming_fragments_assemble_into_whole_tool_call():
     respx.post(URL).mock(return_value=httpx.Response(200, content=body, headers=SSE_HEADERS))
     chunks = await collect(make_provider(), make_req())
     assert chunks == [
-        ToolCallChunk(
-            tool_call=ToolCall(id="call_9", name="get_weather", arguments_json='{"city":"杭州"}')
-        ),
+        ToolCallChunk(tool_call=ToolCall(id="call_9", name="get_weather", arguments_json='{"city":"杭州"}')),
         UsageChunk(model="qwen-flash", prompt_tokens=0, completion_tokens=0),
         StopChunk(reason="tool_calls"),
     ]
@@ -342,11 +326,7 @@ async def test_text_then_tool_calls_respect_chunk_order_invariant():
 
 @respx.mock
 async def test_retry_after_http_date_maps_to_seconds():
-    respx.post(URL).mock(
-        return_value=httpx.Response(
-            429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, text="busy"
-        )
-    )
+    respx.post(URL).mock(return_value=httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, text="busy"))
     with pytest.raises(RateLimitedError) as ei:
         await collect(make_provider(), make_req())
     # HTTP-date 被换算成秒数（过去的日期钳位为 0），绝不允许 ValueError 裸穿三层防线
@@ -356,9 +336,7 @@ async def test_retry_after_http_date_maps_to_seconds():
 
 @respx.mock
 async def test_retry_after_garbage_degrades_to_none():
-    respx.post(URL).mock(
-        return_value=httpx.Response(429, headers={"Retry-After": "soon-ish"}, text="busy")
-    )
+    respx.post(URL).mock(return_value=httpx.Response(429, headers={"Retry-After": "soon-ish"}, text="busy"))
     with pytest.raises(RateLimitedError) as ei:
         await collect(make_provider(), make_req())
     assert ei.value.retry_after is None  # 解析不了就退化为指数退避，不炸

@@ -175,12 +175,8 @@ async def test_hang_walks_standard_retry_path(sleeps, no_jitter):
 
 async def test_deadline_blocks_further_attempts(sleeps):
     """deadline 剩余不足 min_attempt_budget：不再开新尝试，真实死因原样上抛。"""
-    p = ScriptedProvider(
-        [ProviderServerError("x", "real-cause"), ProviderServerError("x", "second")]
-    )
-    gen = complete_with_retry(
-        p, make_req(), "m", RetryPolicy(max_attempts=3), deadline=time.monotonic() + 0.5
-    )
+    p = ScriptedProvider([ProviderServerError("x", "real-cause"), ProviderServerError("x", "second")])
+    gen = complete_with_retry(p, make_req(), "m", RetryPolicy(max_attempts=3), deadline=time.monotonic() + 0.5)
     with pytest.raises(ProviderServerError, match="real-cause"):
         async for _ in gen:
             pass

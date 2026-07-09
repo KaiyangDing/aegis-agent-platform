@@ -113,11 +113,7 @@ async def phase_b() -> list[str]:
     from aegis.gateway.router import Candidate, LLMGateway
 
     gw = LLMGateway(
-        providers={
-            "bailian": OpenAICompatProvider(
-                "bailian", s.dashscope_base_url, s.dashscope_api_key.get_secret_value()
-            )
-        },
+        providers={"bailian": OpenAICompatProvider("bailian", s.dashscope_base_url, s.dashscope_api_key.get_secret_value())},
         routes={"fast": [Candidate("bailian", "qwen-flash")]},  # 单候选：无路可退的绝境
         breaker=CircuitBreaker(redis),  # 默认阈值 5 / open 30s
         limiter=RateLimiter(redis),
@@ -152,8 +148,7 @@ async def ledger_check(success_count: int) -> list[str]:
         row = (
             await session.execute(
                 text(
-                    "SELECT count(*), COALESCE(sum(prompt_tokens+completion_tokens),0),"
-                    " COALESCE(sum(cost),0) FROM usage_ledger WHERE tenant_id = :t"
+                    "SELECT count(*), COALESCE(sum(prompt_tokens+completion_tokens),0), COALESCE(sum(cost),0) FROM usage_ledger WHERE tenant_id = :t"
                 ),
                 {"t": TENANT},
             )
@@ -172,8 +167,7 @@ async def main() -> None:
     gw = build_gateway()
     lines = [
         "M1 故障注入实验报告",
-        f"口径：N={N}，仅 bailian:qwen-flash 注入 30%，重试≤3 次，同档 fallback，"
-        f"缓存关闭，并发 {WORKERS}，限流 20 QPS（实验放宽）",
+        f"口径：N={N}，仅 bailian:qwen-flash 注入 30%，重试≤3 次，同档 fallback，缓存关闭，并发 {WORKERS}，限流 20 QPS（实验放宽）",
         "",
     ]
     a_lines, success = await phase_a(gw)

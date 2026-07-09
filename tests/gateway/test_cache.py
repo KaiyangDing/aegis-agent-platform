@@ -19,9 +19,7 @@ CHUNKS: list[LLMChunk] = [
 
 
 def req(tenant: str = "t1", content: str = "你好", **kw) -> LLMRequest:
-    return LLMRequest(
-        tier="fast", tenant_id=tenant, messages=[Message(role="user", content=content)], **kw
-    )
+    return LLMRequest(tier="fast", tenant_id=tenant, messages=[Message(role="user", content=content)], **kw)
 
 
 class KeyProbe(ExactCache):

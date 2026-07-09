@@ -82,9 +82,7 @@ class AnthropicProvider:
                     try:
                         event = json.loads(data_str)
                     except json.JSONDecodeError as e:
-                        raise ProviderServerError(
-                            self.name, f"SSE 坏行: {sanitize_error_text(data_str, 120)}"
-                        ) from e
+                        raise ProviderServerError(self.name, f"SSE 坏行: {sanitize_error_text(data_str, 120)}") from e
 
                     etype = event.get("type")
                     if etype == "message_start":
@@ -113,18 +111,14 @@ class AnthropicProvider:
                         d = event.get("delta") or {}
                         if d.get("stop_reason"):
                             stop_reason = _STOP_REASON_MAP.get(d["stop_reason"], "end_turn")
-                        output_tokens = (event.get("usage") or {}).get(
-                            "output_tokens", output_tokens
-                        )
+                        output_tokens = (event.get("usage") or {}).get("output_tokens", output_tokens)
                     elif etype == "message_stop":
                         saw_stop = True
                         break
                     elif etype == "error":
                         err = event.get("error") or {}
                         detail = sanitize_error_text(str(err.get("message", "")), 120)
-                        raise ProviderServerError(
-                            self.name, f"流内错误 {err.get('type')}: {detail}"
-                        )
+                        raise ProviderServerError(self.name, f"流内错误 {err.get('type')}: {detail}")
                     # ping 等其余事件类型：无视
         except httpx.PoolTimeout as e:
             raise GatewayOverloadedError(f"[{self.name}] 本地连接池排队超时: {e!r}") from e
@@ -145,9 +139,7 @@ class AnthropicProvider:
                     arguments_json="".join(slot["parts"]),
                 )
             )
-        yield UsageChunk(
-            model=model_name, prompt_tokens=input_tokens, completion_tokens=output_tokens
-        )
+        yield UsageChunk(model=model_name, prompt_tokens=input_tokens, completion_tokens=output_tokens)
         yield StopChunk(reason=stop_reason)
 
     def _build_payload(self, req: LLMRequest, model: str) -> dict:
@@ -195,10 +187,7 @@ class AnthropicProvider:
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         if req.tools:
-            payload["tools"] = [
-                {"name": t.name, "description": t.description, "input_schema": t.parameters}
-                for t in req.tools
-            ]
+            payload["tools"] = [{"name": t.name, "description": t.description, "input_schema": t.parameters} for t in req.tools]
         if req.temperature is not None:
             payload["temperature"] = req.temperature
         return payload

@@ -42,16 +42,10 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        op.f("ix_usage_ledger_created_at"), "usage_ledger", ["created_at"], unique=False
-    )
-    op.create_index(
-        op.f("ix_usage_ledger_request_id"), "usage_ledger", ["request_id"], unique=False
-    )
+    op.create_index(op.f("ix_usage_ledger_created_at"), "usage_ledger", ["created_at"], unique=False)
+    op.create_index(op.f("ix_usage_ledger_request_id"), "usage_ledger", ["request_id"], unique=False)
     op.create_index(op.f("ix_usage_ledger_tenant_id"), "usage_ledger", ["tenant_id"], unique=False)
-    op.create_index(
-        "ix_usage_tenant_created", "usage_ledger", ["tenant_id", "created_at"], unique=False
-    )
+    op.create_index("ix_usage_tenant_created", "usage_ledger", ["tenant_id", "created_at"], unique=False)
     # ### end Alembic commands ###
 
 
