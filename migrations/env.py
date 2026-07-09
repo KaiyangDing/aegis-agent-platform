@@ -7,6 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import aegis.gateway.metering  # noqa: F401  —— 导入即注册：模型进 Base.metadata，autogenerate 才看得见
+import aegis.runtime.store  # noqa: F401  —— 同上：M2.2 运行时五表
 from aegis.core.config import get_settings
 from aegis.core.db import Base
 
