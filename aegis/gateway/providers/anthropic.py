@@ -187,7 +187,9 @@ class AnthropicProvider:
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         if req.tools:
-            payload["tools"] = [{"name": t.name, "description": t.description, "input_schema": t.parameters} for t in req.tools]
+            payload["tools"] = [
+                {"name": t.name, "description": t.description, "input_schema": t.parameters} for t in req.tools
+            ]
         if req.temperature is not None:
             payload["temperature"] = req.temperature
         return payload

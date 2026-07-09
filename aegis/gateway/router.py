@@ -59,7 +59,9 @@ class BreakerLike(Protocol):
 
 
 class LimiterLike(Protocol):
-    async def wait_take(self, scope: str, rate: float, capacity: float, *, max_wait: float = 10.0, cost: float = 1.0) -> bool: ...
+    async def wait_take(
+        self, scope: str, rate: float, capacity: float, *, max_wait: float = 10.0, cost: float = 1.0
+    ) -> bool: ...
 
 
 class CacheLike(Protocol):
@@ -227,14 +229,18 @@ class LLMGateway:
                 logger.warning("预算读取失败，本次放行（fail-open）", exc_info=True)
             else:
                 if spent >= self._monthly_token_budget:
-                    raise BudgetExceeded(f"租户 {req.tenant_id} 本月已用 {spent} token，预算 {self._monthly_token_budget}")
+                    raise BudgetExceeded(
+                        f"租户 {req.tenant_id} 本月已用 {spent} token，预算 {self._monthly_token_budget}"
+                    )
 
         # 单请求预算闸门（三级预算的 L1 级，§10.1 #1）：挡超长上下文炸弹。
         # 在租户限流之前——被拒的请求不该消耗配额；估算口径 ±15%（00 §2.2）
         if self._request_token_budget > 0:
             est = estimate_request_tokens(req)
             if est > self._request_token_budget:
-                raise BudgetExceeded(f"单请求估算 {est} token，超过预算 {self._request_token_budget}（估算口径 00 §2.2）")
+                raise BudgetExceeded(
+                    f"单请求估算 {est} token，超过预算 {self._request_token_budget}（估算口径 00 §2.2）"
+                )
 
         # 红线二：租户配额在候选环外——换供应商换不掉租户身份
         ok = await self._limiter.wait_take(
@@ -329,7 +335,9 @@ class LLMGateway:
             raise GatewayExhausted(f"档位 {req.tier} 首块预算 {req.deadline_s}s 耗尽（候选链未走完）") from last_error
 
         if rejections > 0 and transients == 0:
-            raise GatewayRejected(f"档位 {req.tier} 全部候选均被确定性拒绝——检查 API key 配置与请求转换") from last_error
+            raise GatewayRejected(
+                f"档位 {req.tier} 全部候选均被确定性拒绝——检查 API key 配置与请求转换"
+            ) from last_error
 
         raise GatewayExhausted(f"档位 {req.tier} 的所有候选均不可用") from last_error
 

@@ -109,7 +109,13 @@ class ContextConfig:
     @property
     def input_total(self) -> int:
         """输入侧五层合计（不含输出余量），默认 12_500——M2.5 编译器与 M2.7 对账用。"""
-        return self.system_budget + self.memory_budget + self.history_budget + self.retrieval_budget + self.tool_results_budget
+        return (
+            self.system_budget
+            + self.memory_budget
+            + self.history_budget
+            + self.retrieval_budget
+            + self.tool_results_budget
+        )
 
 
 class SubAgentPolicy(StrEnum):

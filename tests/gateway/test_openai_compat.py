@@ -326,7 +326,9 @@ async def test_text_then_tool_calls_respect_chunk_order_invariant():
 
 @respx.mock
 async def test_retry_after_http_date_maps_to_seconds():
-    respx.post(URL).mock(return_value=httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, text="busy"))
+    respx.post(URL).mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, text="busy")
+    )
     with pytest.raises(RateLimitedError) as ei:
         await collect(make_provider(), make_req())
     # HTTP-date 被换算成秒数（过去的日期钳位为 0），绝不允许 ValueError 裸穿三层防线
