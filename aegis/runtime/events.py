@@ -49,6 +49,7 @@ class AgentEvent:
     从 1 起；(session_id, seq) 唯一约束是并发写入的最后防线（M2.2）。
     """
 
+    id: str
     session_id: str
     run_id: str
     seq: int
@@ -57,6 +58,8 @@ class AgentEvent:
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("id 不许为空——事件身份即幂等键，要出境到下游去重（03 §4）")
         if not self.session_id:
             raise ValueError("session_id 不许为空——事件必须归属会话（trace_id ≡ session_id，X5）")
         if not self.run_id:

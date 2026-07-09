@@ -36,6 +36,7 @@ def test_schema_version_is_one() -> None:
 
 def test_agent_event_fields_and_frozen() -> None:
     e = AgentEvent(
+        id="e-1",
         session_id="s-1",
         run_id="r-1",
         seq=1,
@@ -48,9 +49,9 @@ def test_agent_event_fields_and_frozen() -> None:
         e.seq = 2  # type: ignore[misc]
 
 
-@pytest.mark.parametrize("blank", ["session_id", "run_id"])
+@pytest.mark.parametrize("blank", ["id", "session_id", "run_id"])  # ← 加 "id"
 def test_agent_event_rejects_blank_ids(blank: str) -> None:
-    kwargs: dict[str, Any] = dict(session_id="s", run_id="r", seq=1, type=EventType.HANDOFF, payload={})
+    kwargs: dict[str, Any] = dict(id="e", session_id="s", run_id="r", seq=1, type=EventType.HANDOFF, payload={})
     kwargs[blank] = ""
     with pytest.raises(ValueError, match=blank):
         AgentEvent(**kwargs)
@@ -60,6 +61,7 @@ def test_agent_event_rejects_blank_ids(blank: str) -> None:
 def test_agent_event_rejects_bad_seq(bad_seq: int) -> None:
     with pytest.raises(ValueError, match="seq"):
         AgentEvent(
+            id="e",
             session_id="s",
             run_id="r",
             seq=bad_seq,
@@ -71,6 +73,7 @@ def test_agent_event_rejects_bad_seq(bad_seq: int) -> None:
 def test_agent_event_rejects_bad_schema_version() -> None:
     with pytest.raises(ValueError, match="schema_version"):
         AgentEvent(
+            id="e",
             session_id="s",
             run_id="r",
             seq=1,

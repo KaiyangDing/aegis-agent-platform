@@ -8,15 +8,21 @@ events 是状态恢复的唯一事实源；messages / tool_invocations / session
 
 from __future__ import annotations
 
+import asyncio
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, UniqueConstraint, func, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aegis.core.db import Base
+from aegis.runtime.events import SCHEMA_VERSION, AgentEvent, EventType
 
 
 class RunState(StrEnum):
@@ -144,3 +150,115 @@ class ApprovalRecord(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+SessionFactory = Callable[[], AsyncSession]
+"""写入器眼中的会话工厂：按形状声明（零参可调用、返回 AsyncSession），
+不绑死 async_sessionmaker 具体类——测试的故障注入工厂靠这道缝隙进来（与 GatewayLike 同理）。"""
+_RETRY_BACKOFF_S: tuple[float, ...] = (0.1, 0.2, 0.4)
+"""瞬态故障的退避序列：共 3 次重试（02 §5"短退避重试 3 次"），总额外等待 ~0.7s。
+不做抖动：M1 的满抖动防的是多客户端雷群打上游，单写者无此竞争面。"""
+
+
+class EventStoreUnavailable(RuntimeError):
+    """PG 瞬态故障重试耗尽：事实源不可用 = 服务不可用（02 §5），终止本次 run。"""
+
+
+class EventWriteFenced(RuntimeError):
+    """围栏信号（C2）：(session_id, seq) 被别的写者占用——本写者的会话所有权已旁落。
+    终态，绝不退避重试；当前 loop 应立即自毁，恢复交给持有新租约的一方。"""
+
+
+class EventWriter:
+    """单写者：一个 run 一个实例，创建前提是已持会话锁（M2.9 接电，约束兜底）。
+
+    append() 返回即事件已 durably committed——write-ahead"落盘是副作用的前置"
+    由此成立；append 内部事务是投影同事务派生的挂点（交付③）。
+    """
+
+    def __init__(
+        self,
+        factory: SessionFactory,
+        session_id: str,
+        run_id: str,
+        next_seq: int,
+        *,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        id_factory: Callable[[], str] | None = None,
+    ) -> None:
+        self._factory = factory
+        self._session_id = session_id
+        self._run_id = run_id
+        self._next_seq = next_seq
+        self._sleep = sleep
+        self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
+
+    @classmethod
+    async def open(
+        cls,
+        factory: SessionFactory,
+        session_id: str,
+        run_id: str,
+        *,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        id_factory: Callable[[], str] | None = None,
+    ) -> EventWriter:
+        """读一次流尾接着写——恢复场景下新 run 天然接续旧流的 seq。"""
+        async with factory() as s:
+            max_seq = (
+                await s.execute(
+                    select(func.coalesce(func.max(EventRecord.seq), 0)).where(EventRecord.session_id == session_id)
+                )
+            ).scalar_one()
+        return cls(factory, session_id, run_id, max_seq + 1, sleep=sleep, id_factory=id_factory)
+
+    async def append(self, event_type: EventType, payload: Mapping[str, Any]) -> AgentEvent:
+        """写一条事实。返回时已 durably committed；seq 仅在成功后推进。"""
+        event_id = self._id_factory()
+        seq = self._next_seq
+        attempt = 0
+        while True:
+            try:
+                async with self._factory() as s:
+                    async with s.begin():
+                        s.add(
+                            EventRecord(
+                                id=event_id,
+                                session_id=self._session_id,
+                                run_id=self._run_id,
+                                seq=seq,
+                                type=event_type.value,
+                                schema_version=SCHEMA_VERSION,
+                                payload=dict(payload),
+                            )
+                        )
+                break
+            except IntegrityError as e:
+                # 三岔口：能抛 IntegrityError 说明 PG 是通的，紧随其后的核查查询几乎必然可用
+                if await self._already_written(event_id):
+                    break  # 幽灵写入：上次尝试实际成功，commit 的 ack 丢了——当成功
+                raise EventWriteFenced(
+                    f"session={self._session_id} seq={seq} 已被其他写者占用——所有权旁落，本 loop 应自毁"
+                ) from e
+            except (OperationalError, InterfaceError) as e:
+                # 可重试白名单：连接级故障才配重试；ProgrammingError 等 bug 信号裸抛
+                if attempt >= len(_RETRY_BACKOFF_S):
+                    raise EventStoreUnavailable(
+                        f"事件写入重试 {len(_RETRY_BACKOFF_S)} 次仍失败——事实源不可用，终止本次 run"
+                    ) from e
+                await self._sleep(_RETRY_BACKOFF_S[attempt])
+                attempt += 1
+        self._next_seq += 1
+        return AgentEvent(
+            id=event_id,
+            session_id=self._session_id,
+            run_id=self._run_id,
+            seq=seq,
+            type=event_type,
+            payload=dict(payload),
+        )
+
+    async def _already_written(self, event_id: str) -> bool:
+        async with self._factory() as s:
+            row = (await s.execute(select(EventRecord.id).where(EventRecord.id == event_id))).scalar_one_or_none()
+        return row is not None
