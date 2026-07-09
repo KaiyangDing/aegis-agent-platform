@@ -13,9 +13,21 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, UniqueConstraint, func, select
+from sqlalchemy import (
+    BigInteger,
+    CursorResult,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -169,6 +181,110 @@ class EventWriteFenced(RuntimeError):
     终态，绝不退避重试；当前 loop 应立即自毁，恢复交给持有新租约的一方。"""
 
 
+class ProjectionError(RuntimeError):
+    """投影派生失败：payload 缺必需字段或被引用的行不存在——bug 信号，裸抛不重试。
+    它发生在 append 事务内部，会连事件一起回滚：事实与投影同生共死。"""
+
+
+async def _project_message(s: AsyncSession, r: EventRecord, role: str) -> None:
+    s.add(
+        MessageRecord(
+            session_id=r.session_id,
+            event_id=r.id,
+            role=role,
+            content=r.payload["content"],
+            token_usage=r.payload.get("token_usage"),
+        )
+    )
+
+
+async def _project_user_message(s: AsyncSession, r: EventRecord) -> None:
+    await _project_message(s, r, role="user")
+
+
+async def _project_assistant_message(s: AsyncSession, r: EventRecord) -> None:
+    await _project_message(s, r, role="assistant")
+
+
+async def _project_tool_call(s: AsyncSession, r: EventRecord) -> None:
+    s.add(
+        ToolInvocationRecord(
+            session_id=r.session_id,
+            event_id=r.id,  # = 幂等键：write-ahead 与审计在此对齐
+            tool_name=r.payload["tool_name"],
+            args=r.payload["args"],
+        )
+    )
+
+
+async def _finish_invocation(s: AsyncSession, r: EventRecord, **values: object) -> None:
+    res = cast(
+        # DML 的 execute 运行时恒返回 CursorResult；存根在此链上退化为 Result[Any]，cast 记录运行时事实
+        CursorResult[Any],
+        await s.execute(
+            update(ToolInvocationRecord)
+            .where(ToolInvocationRecord.event_id == r.payload["tool_call_id"])
+            .values(finished_at=func.now(), retry_count=r.payload.get("retry_count", 0), **values)
+        ),
+    )
+    if res.rowcount != 1:
+        raise ProjectionError(f"tool_call_id={r.payload['tool_call_id']} 无对应 invocation 行——write-ahead 顺序被破坏")
+
+
+async def _project_tool_result(s: AsyncSession, r: EventRecord) -> None:
+    await _finish_invocation(
+        s,
+        r,
+        status=InvocationStatus.SUCCEEDED.value,
+        result_digest=r.payload.get("digest"),  # 摘要进投影；原文留在事件 payload（X4）
+        latency_ms=r.payload.get("latency_ms"),
+    )
+
+
+async def _project_tool_error(s: AsyncSession, r: EventRecord) -> None:
+    await _finish_invocation(
+        s,
+        r,
+        status=InvocationStatus.FAILED.value,
+        error=r.payload["error"],
+        latency_ms=r.payload.get("latency_ms"),
+    )
+
+
+async def _project_summary(s: AsyncSession, r: EventRecord) -> None:
+    res = cast(
+        CursorResult[Any],
+        await s.execute(
+            update(SessionRecord).where(SessionRecord.id == r.session_id).values(summary=r.payload["summary"])
+        ),
+    )
+    if res.rowcount != 1:
+        raise ProjectionError(f"session={r.session_id} 行不存在——摘要不可能先于会话存在")
+
+
+_PROJECTORS: dict[str, Callable[[AsyncSession, EventRecord], Awaitable[None]]] = {
+    EventType.USER_MESSAGE.value: _project_user_message,
+    EventType.ASSISTANT_MESSAGE.value: _project_assistant_message,
+    EventType.TOOL_CALL.value: _project_tool_call,
+    EventType.TOOL_RESULT.value: _project_tool_result,
+    EventType.TOOL_ERROR.value: _project_tool_error,
+    EventType.SUMMARY_UPDATED.value: _project_summary,
+}
+"""投影 dispatch 表：查不到 = 该事件无投影（llm_call/审批类/终止类）。
+审批类不在此列不是遗漏——approvals 是独立状态机不是投影（先于事件出生，CAS 随交付④）。"""
+
+
+async def _apply_projections(s: AsyncSession, record: EventRecord) -> None:
+    """投影是事件的纯函数：只读 record，不读时钟与外部状态——回放才可重建。"""
+    handler = _PROJECTORS.get(record.type)
+    if handler is None:
+        return
+    try:
+        await handler(s, record)
+    except KeyError as e:
+        raise ProjectionError(f"{record.type} 事件 payload 缺少投影必需字段 {e}") from e
+
+
 class EventWriter:
     """单写者：一个 run 一个实例，创建前提是已持会话锁（M2.9 接电，约束兜底）。
 
@@ -221,17 +337,17 @@ class EventWriter:
             try:
                 async with self._factory() as s:
                     async with s.begin():
-                        s.add(
-                            EventRecord(
-                                id=event_id,
-                                session_id=self._session_id,
-                                run_id=self._run_id,
-                                seq=seq,
-                                type=event_type.value,
-                                schema_version=SCHEMA_VERSION,
-                                payload=dict(payload),
-                            )
+                        record = EventRecord(
+                            id=event_id,
+                            session_id=self._session_id,
+                            run_id=self._run_id,
+                            seq=seq,
+                            type=event_type.value,
+                            schema_version=SCHEMA_VERSION,
+                            payload=dict(payload),
                         )
+                        s.add(record)
+                        await _apply_projections(s, record)
                 break
             except IntegrityError as e:
                 # 三岔口：能抛 IntegrityError 说明 PG 是通的，紧随其后的核查查询几乎必然可用

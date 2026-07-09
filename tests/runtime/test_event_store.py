@@ -67,7 +67,7 @@ async def test_append_assigns_sequential_seq_and_persists(db_session_factory) ->
 async def test_open_resumes_after_existing_stream(db_session_factory) -> None:
     """恢复语义：新 run 的写者接着旧流的 seq 写，不从 1 重来。"""
     w1 = await EventWriter.open(db_session_factory, "s-2", "r-1", id_factory=_ids("a"))
-    await w1.append(EventType.USER_MESSAGE, {})
+    await w1.append(EventType.LLM_CALL, {})
     await w1.append(EventType.LLM_CALL, {})
     w2 = await EventWriter.open(db_session_factory, "s-2", "r-2", id_factory=_ids("b"))
     e = await w2.append(EventType.LLM_RESULT, {})
@@ -85,12 +85,12 @@ async def test_ghost_write_resolved_by_id_as_success(db_session_factory) -> None
                     session_id="s-3",
                     run_id="r-1",
                     seq=1,
-                    type="user_message",
+                    type="llm_call",
                     schema_version=1,
                     payload={},
                 )
             )
-    e = await w.append(EventType.USER_MESSAGE, {})
+    e = await w.append(EventType.LLM_CALL, {})
     assert e.seq == 1 and e.id == "ghost-1"
     async with db_session_factory() as s:
         n = (
@@ -106,7 +106,7 @@ async def test_fencing_is_terminal_without_retry(db_session_factory) -> None:
         db_session_factory, "s-4", "r-1", sleep=_sleep_recorder(slept), id_factory=lambda: "mine-1"
     )
     intruder = await EventWriter.open(db_session_factory, "s-4", "r-9", id_factory=lambda: "other-1")
-    await intruder.append(EventType.USER_MESSAGE, {})
+    await intruder.append(EventType.LLM_CALL, {})
     with pytest.raises(EventWriteFenced, match="s-4"):
         await w.append(EventType.LLM_CALL, {})
     assert slept == []
@@ -116,7 +116,7 @@ async def test_transient_failure_retries_then_succeeds(db_session_factory) -> No
     slept: list[float] = []
     flaky = _FlakyFactory(db_session_factory, fail_times=2)
     w = EventWriter(flaky, "s-5", "r-1", next_seq=1, sleep=_sleep_recorder(slept), id_factory=_ids())
-    e = await w.append(EventType.USER_MESSAGE, {})
+    e = await w.append(EventType.LLM_CALL, {})
     assert e.seq == 1
     assert slept == [0.1, 0.2]
 
@@ -126,7 +126,7 @@ async def test_retry_exhaustion_raises_unavailable(db_session_factory) -> None:
     flaky = _FlakyFactory(db_session_factory, fail_times=99)
     w = EventWriter(flaky, "s-6", "r-1", next_seq=1, sleep=_sleep_recorder(slept), id_factory=_ids())
     with pytest.raises(EventStoreUnavailable, match="终止本次 run"):
-        await w.append(EventType.USER_MESSAGE, {})
+        await w.append(EventType.LLM_CALL, {})
     assert slept == [0.1, 0.2, 0.4]
     assert flaky.calls == 4  # 1 次初始 + 3 次重试
 
@@ -137,5 +137,5 @@ async def test_bug_class_errors_propagate_without_retry(db_session_factory) -> N
     flaky = _FlakyFactory(db_session_factory, fail_times=99, exc=ProgrammingError)
     w = EventWriter(flaky, "s-7", "r-1", next_seq=1, sleep=_sleep_recorder(slept), id_factory=_ids())
     with pytest.raises(ProgrammingError):
-        await w.append(EventType.USER_MESSAGE, {})
+        await w.append(EventType.LLM_CALL, {})
     assert slept == [] and flaky.calls == 1

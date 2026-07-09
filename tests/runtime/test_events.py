@@ -26,6 +26,7 @@ def test_event_type_values_are_stable() -> None:
         "approval_expired",
         "loop_terminated",
         "handoff",
+        "summary_updated",
     }
 
 

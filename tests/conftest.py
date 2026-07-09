@@ -1,4 +1,4 @@
-"""gateway 测试共享夹具：conftest.py 里的夹具被同目录所有测试自动发现，无需 import。"""
+"""全仓测试共享夹具：根 conftest 的夹具被所有子目录测试自动发现，无需 import。"""
 
 import os
 

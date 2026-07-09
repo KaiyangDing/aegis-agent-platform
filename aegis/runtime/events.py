@@ -19,11 +19,8 @@ SCHEMA_VERSION = 1
 
 
 class EventType(StrEnum):
-    """事件类型全集（03 §5 表，13 类）。值进 events 表与回放断言，快照测试钉死。
-
-    C8 裁决（是否新增 summary_updated）随 M2.2：加成员时快照测试先红，
-    显式过口径后再改——防沉默漂移正是快照的用途。
-    """
+    """事件类型全集（03 §5 表，14 类——C8 于 2026-07-09 增 summary_updated）。
+    值进 events 表与回放断言，快照测试钉死；加成员必须显式过口径后更新快照。"""
 
     USER_MESSAGE = "user_message"
     ASSISTANT_MESSAGE = "assistant_message"
@@ -36,6 +33,7 @@ class EventType(StrEnum):
     APPROVAL_DECIDED = "approval_decided"
     APPROVAL_CANCELLED = "approval_cancelled"
     APPROVAL_EXPIRED = "approval_expired"
+    SUMMARY_UPDATED = "summary_updated"
     LOOP_TERMINATED = "loop_terminated"
     HANDOFF = "handoff"
 
