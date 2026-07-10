@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ValidationError
 
+from aegis.core.tokens import estimate_tokens
 from aegis.runtime.events import AgentEvent, EventType
 from aegis.runtime.tools import SideEffect, ToolContext, ToolRegistry
 
@@ -67,6 +68,22 @@ def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
+_DIGEST_CHARS = 200
+
+
+def _digest(text: str) -> str:
+    """投影列用的单行摘要头：审计浏览用，不承载语义完整性。"""
+    return " ".join(text.split())[:_DIGEST_CHARS]
+
+
+def _truncate_to_budget(text: str, budget_tokens: int) -> str:
+    """确定性硬截断（C34 的 fail-open 兜底）：按估算尺剪进预算，尾部标注。
+    截断标注自身有 ~20 token 开销——预算数字自带余量消化（C25）。"""
+    while estimate_tokens(text) > budget_tokens and len(text) > 1:
+        text = text[: max(1, int(len(text) * 0.8))]
+    return text + "……[工具结果超预算已截断，完整原文在事件流]"
+
+
 class ToolExecutor:
     """每个 run 一个实例：连败计数与禁用集的"本轮"就是一次 run 的寿命。"""
 
@@ -80,6 +97,8 @@ class ToolExecutor:
         tenant_config: Mapping[str, Any],
         default_timeout_s: float = 30.0,
         fail_streak_limit: int = 2,
+        result_token_budget: int = 3_000,
+        summarize: Callable[[str], Awaitable[str]] | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._tools = tools
@@ -89,6 +108,8 @@ class ToolExecutor:
         self._tenant_config = tenant_config
         self._default_timeout_s = default_timeout_s
         self._fail_streak_limit = fail_streak_limit
+        self._result_token_budget = result_token_budget
+        self._summarize = summarize
         self._sleep = sleep
         self._fail_streaks: dict[str, int] = {}
         self._disabled: set[str] = set()
@@ -184,23 +205,21 @@ class ToolExecutor:
                     return self._fail(name, f"工具执行失败：{e}", tool_call_id=call_event.id)
                 await self._sleep(0.2 * attempt)
 
-        # 成功：连败账清零；结果原文入事件流（X4），规范化随交付③
+        # 成功：连败账清零 → 生命周期⑥规范化 → ⑦事件留痕（投影自动闭合）
         self._fail_streaks.pop(name, None)
-        await self._events.append(
-            EventType.TOOL_RESULT,
-            {
-                "tool_call_id": call_event.id,
-                "result": result,
-                "latency_ms": _elapsed_ms(started),  # C31 回放等价断言的豁免字段：记录、不比对
-                "retry_count": attempt - 1,
-            },
-        )
-        return ToolOutcome(
-            OutcomeKind.OK,
-            name,
-            json.dumps(result, ensure_ascii=False, default=str),
-            tool_call_id=call_event.id,
-        )
+        raw_text = json.dumps(result, ensure_ascii=False, default=str)
+        payload: dict[str, Any] = {
+            "tool_call_id": call_event.id,
+            "result": result,  # 原文永远全量在事件流（X4）
+            "latency_ms": _elapsed_ms(started),  # C31 回放等价断言的豁免字段
+            "retry_count": attempt - 1,
+        }
+        content = raw_text
+        if estimate_tokens(raw_text) > self._result_token_budget:
+            content = await self._shrink(raw_text, payload)
+        payload["digest"] = _digest(content)
+        await self._events.append(EventType.TOOL_RESULT, payload)
+        return ToolOutcome(OutcomeKind.OK, name, content, tool_call_id=call_event.id)
 
     def _fail(self, name: str, content: str, *, tool_call_id: str | None = None) -> ToolOutcome:
         """记连败账：达到上限即禁用，并在当次回填里宣告——模型立刻知道该改道。"""
@@ -221,3 +240,23 @@ class ToolExecutor:
                 "retry_count": retry_count,
             },
         )
+
+    async def _shrink(self, raw_text: str, payload: dict[str, Any]) -> str:
+        """生命周期⑥：超预算收缩。首选摘要钩子（fast 档的座位，M2.7 接网关），
+        钩子缺席或失败一律 fail-open 硬截断（C34——增强层坏了往活里放，
+        与风险闸门的 fail-closed 相反方向）。收缩产物随事件留痕（X4）：
+        摘要是 LLM 产物不可确定重算，不留痕则回放重建不出模型视界。"""
+        if self._summarize is not None:
+            try:
+                summary = f"（工具结果超预算，以下为摘要）{await self._summarize(raw_text)}"
+                if estimate_tokens(summary) > self._result_token_budget:
+                    summary = _truncate_to_budget(summary, self._result_token_budget)
+                payload["injected"] = summary
+                payload["normalization"] = "summary"
+                return summary
+            except Exception as e:
+                payload["summarize_error"] = str(e)  # C34：降级必须审计留痕
+        shrunk = _truncate_to_budget(raw_text, self._result_token_budget)
+        payload["injected"] = shrunk
+        payload["normalization"] = "truncated"
+        return shrunk
