@@ -308,6 +308,14 @@ class EventWriter:
         self._sleep = sleep
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
 
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def run_id(self) -> str:
+        return self._run_id
+
     @classmethod
     async def open(
         cls,

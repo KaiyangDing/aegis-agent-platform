@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
-import pytest
+from collections.abc import Mapping
+from typing import Any
 
+from aegis.runtime.events import AgentEvent, EventType
 from aegis.runtime.executor import OutcomeKind, ToolExecutor
 from aegis.runtime.tools import SideEffect, ToolContext, ToolRegistry, tool
 
 TENANT_CFG = {"approval_threshold": 200}
 
 
+class _NullSink:
+    """前厅测试替身：顺便断言执行器在 write-ahead 之前绝不写事件。"""
+
+    session_id = "s-front"
+    run_id = "r-front"
+
+    async def append(self, event_type: EventType, payload: Mapping[str, Any]) -> AgentEvent:
+        raise AssertionError("前厅路径不该写事件")
+
+
 def _executor(reg: ToolRegistry) -> ToolExecutor:
-    return ToolExecutor(reg, TENANT_CFG)
+    return ToolExecutor(reg, _NullSink(), tenant_id="t-a", user_id="u-1", tenant_config=TENANT_CFG)
 
 
 def test_outcome_kind_values_are_stable() -> None:
@@ -51,17 +63,6 @@ async def test_lax_numeric_string_then_gate_hits(demo_registry: ToolRegistry) ->
     assert out.kind is OutcomeKind.NEEDS_APPROVAL
 
 
-async def test_gate_passes_small_amount_reaches_execution_boundary(demo_registry: ToolRegistry) -> None:
-    """低于阈值：全部闸门通过，抵达交付②的执行边界。"""
-    with pytest.raises(NotImplementedError, match="交付②"):
-        await _executor(demo_registry).execute("demo_refund_apply", '{"order_id": "1", "amount": 80}')
-
-
-async def test_read_tool_reaches_execution_boundary(demo_registry: ToolRegistry) -> None:
-    with pytest.raises(NotImplementedError):
-        await _executor(demo_registry).execute("demo_order_query", '{"order_id": "1"}')
-
-
 def _gate_boom(args, cfg) -> bool:
     raise RuntimeError("闸门自己炸了")
 
@@ -98,5 +99,5 @@ async def test_streak_is_per_tool_and_per_run(demo_registry: ToolRegistry) -> No
     out_b = await ex.execute("demo_ticket_create", '{"title": 1}')
     assert out_b.kind is OutcomeKind.ERROR  # B 工具首败：只是 ERROR，不受 A 连累
     fresh = _executor(demo_registry)
-    with pytest.raises(NotImplementedError):
-        await fresh.execute("demo_order_query", '{"order_id": "1"}')
+    out = await fresh.execute("demo_order_query", "{broken")  # 新 run：同名工具回到首败待遇
+    assert out.kind is OutcomeKind.ERROR and "本轮已禁用" not in out.content
