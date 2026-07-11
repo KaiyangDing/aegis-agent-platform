@@ -10,6 +10,8 @@
 与 M2.12"逐事件一致"强断言的前提。
 """
 
+from __future__ import annotations
+
 import logging
 import math
 from collections.abc import Awaitable, Callable, Sequence
