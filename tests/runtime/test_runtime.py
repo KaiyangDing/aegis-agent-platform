@@ -1,23 +1,16 @@
-"""M2.1 交付③：门面契约测试——签名定死、协议兼容、循环体未接电。"""
+"""M2.1 交付③（M2.7 改写）：门面契约测试——run 签名快照 + 真网关协议兼容。
+
+M2.7 前此处断言 NotImplementedError（循环未接电）；接电后改为签名锁：
+run() 是 M2 的对外契约（runtime.py），参数名与注解逐项钉死，动它先让这里红。
+行为测试全在 test_loop_*.py，本文件只守契约形状。
+"""
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-
-import pytest
+import inspect
 
 from aegis.gateway.router import LLMGateway as RouterGateway
-from aegis.gateway.schema import LLMChunk, LLMRequest
 from aegis.runtime.runtime import AgentRuntime, GatewayLike
-from aegis.runtime.spec import AgentSpec
-
-
-class _NullGateway:
-    """结构化满足 GatewayLike 的最小假网关——M2.1 阶段门面不该碰它。"""
-
-    async def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
-        raise AssertionError("M2.1 门面不该调网关")
-        yield  # 不可达；使其成为 async 生成器
 
 
 def test_real_gateway_structurally_satisfies_protocol() -> None:
@@ -31,9 +24,11 @@ def test_real_gateway_structurally_satisfies_protocol() -> None:
     assert True
 
 
-async def test_run_signature_locked_but_not_implemented() -> None:
-    """签名可用（DI + async 生成器惰性），循环体明确未接电。"""
-    rt = AgentRuntime(gateway=_NullGateway())
-    stream = rt.run(AgentSpec(system_prompt="x"), session_id="s-1", user_input="你好")
-    with pytest.raises(NotImplementedError):
-        await anext(stream)
+def test_run_signature_unchanged() -> None:
+    """签名快照（全仓开 future annotations，注解在运行时是字符串——按字符串断言）。"""
+    sig = inspect.signature(AgentRuntime.run)
+    assert list(sig.parameters) == ["self", "spec", "session_id", "user_input"]
+    assert sig.parameters["spec"].annotation == "AgentSpec"
+    assert sig.parameters["session_id"].annotation == "str"
+    assert sig.parameters["user_input"].annotation == "str"
+    assert sig.return_annotation == "AsyncIterator[AgentEvent]"

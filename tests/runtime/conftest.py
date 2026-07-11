@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from aegis.runtime.store import SessionRecord
 from aegis.runtime.tools import SideEffect, ToolContext, ToolRegistry, tool
 
 
@@ -41,3 +42,18 @@ async def demo_ticket_create(ctx: ToolContext, title: str) -> dict:
 def demo_registry() -> ToolRegistry:
     """每个测试一个全新注册表——测试之间不共享可变状态。"""
     return ToolRegistry([demo_order_query, demo_refund_apply, demo_ticket_create])
+
+
+@pytest.fixture
+def make_session(db_session_factory):
+    """建 sessions 行的帮助协程（M2.7 P2 拍板：run 开头读行取身份，无行拒绝起跑）。
+
+    M2 测试自建行；M3.2 起由 API 层建会话。摘要投影同样要求行先存在（store.py:261）。
+    """
+
+    async def _make(session_id: str, *, tenant_id: str = "t-a", user_id: str = "u-1") -> None:
+        async with db_session_factory() as s:
+            async with s.begin():
+                s.add(SessionRecord(id=session_id, tenant_id=tenant_id, user_id=user_id))
+
+    return _make
