@@ -11,7 +11,7 @@ from aegis.runtime.events import SCHEMA_VERSION, AgentEvent, EventType
 
 
 def test_event_type_values_are_stable() -> None:
-    """13 类值快照（03 §5 表）。M2.2 若按 C8 增 summary_updated，先让这里红、过口径再改。"""
+    """14 类值快照（03 §5 表；M2.2 已按 C8 增 summary_updated）。再加成员先让这里红、过口径再改。"""
     assert {e.value for e in EventType} == {
         "user_message",
         "assistant_message",
