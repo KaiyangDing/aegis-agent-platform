@@ -1,0 +1,248 @@
+{
+  "format_version": 1,
+  "session_id": "adv-runaway",
+  "scopes": {
+    "main": [
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-1",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-1\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-2",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-2\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-3",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-3\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-4",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-4\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-5",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-5\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-6",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-6\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-7",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-7\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-8",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-8\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-9",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-9\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "rw-10",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-10\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      }
+    ]
+  }
+}

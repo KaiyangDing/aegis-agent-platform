@@ -1,0 +1,56 @@
+{
+  "format_version": 1,
+  "session_id": "adv-empty",
+  "scopes": {
+    "main": [
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 15,
+            "completion_tokens": 0,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 15,
+            "completion_tokens": 0,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 15,
+            "completion_tokens": 0,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      }
+    ]
+  }
+}

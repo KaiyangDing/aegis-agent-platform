@@ -1,0 +1,104 @@
+{
+  "format_version": 1,
+  "session_id": "adv-tool-loop",
+  "scopes": {
+    "main": [
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "tl-1",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-13\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "tl-2",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-13\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "tl-3",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-13\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {},
+        "chunks": [
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "tl-4",
+              "name": "demo_order_query",
+              "arguments_json": "{\"order_id\": \"A-13\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      }
+    ]
+  }
+}
