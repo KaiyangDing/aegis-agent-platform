@@ -31,7 +31,7 @@ from aegis.gateway.schema import (
 )
 from aegis.runtime.context import ContextBuilder
 from aegis.runtime.events import AgentEvent, EventType
-from aegis.runtime.executor import ToolExecutor
+from aegis.runtime.executor import OutcomeKind, ToolExecutor
 from aegis.runtime.spec import AgentSpec, TerminationReason
 from aegis.runtime.store import EventWriter
 
@@ -123,6 +123,12 @@ def _estimate_messages(messages: Sequence[Message]) -> int:
 def _estimate_turn_output(turn: _LLMTurn) -> int:
     """D8 输出侧估算：聚合文本 + 各 arguments_json。"""
     return estimate_tokens(turn.text) + sum(estimate_tokens(tc.arguments_json) for tc in turn.tool_calls)
+
+
+def _discard_note(base: str, total: int, index: int) -> str:
+    """D20：工具序列中途终止时，把被弃置的剩余调用数写进 detail 留痕。"""
+    discarded = total - index - 1
+    return f"{base}；弃置本轮剩余 {discarded} 个调用" if discarded else base
 
 
 class AgentLoop:
@@ -348,8 +354,76 @@ class AgentLoop:
         )
 
     async def _run_tools(self, turn: _LLMTurn) -> TerminationReason | None:
-        """工具分支：五结局映射 + 闸门 #4 重复检测 + D6 幻觉计数（交付②接电）。"""
-        raise NotImplementedError("工具分支随 M2.7 交付②接电")
+        """工具分支（D20：顺序逐个执行，无并行）：闸门 #4/#6 检查点 + D6 幻觉记账 + 五结局回填。
+
+        返回非 None = 已在内部 _terminate，run() 收尾外流后直接 return。
+        执行器的业务结局全部编码在 ToolOutcome；基础设施异常（EventStoreUnavailable/
+        EventWriteFenced）不在此捕获——裸穿出 run()（§4.4 末行：PG 挂=服务不可用，围栏=自毁）。
+        """
+        known = {spec.name for spec in self._tool_specs}
+        total = len(turn.tool_calls)
+        for index, call in enumerate(turn.tool_calls):
+            # 闸门 #6：每个工具执行前的取消检查点（P1，与 LLM 调用前那次成对）
+            if self._cancel_event is not None and self._cancel_event.is_set():
+                await self._terminate(
+                    TerminationReason.CANCELLED,
+                    detail=_discard_note("收到取消信号（工具检查点）", total, index),
+                    fallback=None,
+                )
+                return TerminationReason.CANCELLED
+
+            # 闸门 #4 重复检测（D5 连续计数器）：key = (工具名, 参数规范形)，换 key 即重置
+            key = (call.name, canonical_json(call.arguments_json))
+            if key == self._repeat_key:
+                self._repeat_streak += 1
+            else:
+                self._repeat_key = key
+                self._repeat_streak = 1
+            if self._repeat_streak > self._policy.repeat_call_limit:
+                # 打断不清零，原样再犯 → 终止（03:51"再犯则终止"）
+                await self._terminate(
+                    TerminationReason.REPEATED_CALLS,
+                    detail=_discard_note(f"打断后仍第 {self._repeat_streak} 次重复调用 {call.name}", total, index),
+                    fallback=FALLBACK_REPEATED,
+                )
+                return TerminationReason.REPEATED_CALLS
+            if self._repeat_streak == self._policy.repeat_call_limit:
+                # 达阈值：该次不执行——无 write-ahead 即无 tool_call 事件（I8）；
+                # 打断话术仍以 role=tool 配对回填，缺配对下一轮会被上游 400（§7 坑 8）
+                self._feed_tool_message(call, PROMPT_REPEAT_BREAK.format(limit=self._policy.repeat_call_limit))
+                continue
+
+            # D6：幻觉工具名计入闸门 #5（语法是调用、语义非法）；回填文本用 executor 的
+            # ERROR 话术（点名可用工具，executor.py:118-122），loop 只负责违规记账
+            if call.name not in known:
+                self._violations += 1
+                if self._violations > self._policy.protocol_retry_limit:
+                    await self._terminate(
+                        TerminationReason.PROTOCOL_VIOLATION,
+                        detail=_discard_note(f"幻觉工具名 {call.name}，连续违规第 {self._violations} 次", total, index),
+                        fallback=FALLBACK_PROTOCOL,
+                    )
+                    return TerminationReason.PROTOCOL_VIOLATION
+
+            outcome = await self._executor.execute(call.name, call.arguments_json)
+            if outcome.kind is OutcomeKind.NEEDS_APPROVAL:
+                # M2.9: 在此替换为挂起路径（创建审批单 → awaiting_approval → run 可下线）。
+                # 本步按 K3 拍板回填继续：不碰 approvals/run_state/事件，
+                # 不发明会在 M2.9 报废的临时 payload（回放资产不折旧）
+                self._feed_tool_message(call, outcome.content)
+                continue
+            # 其余四结局同样回填继续（§4.3 表）：错误文本是模型的观察结果，它通常能自我修正；
+            # RESULT_UNKNOWN 的 content 已含"禁止重试"话术（X1），loop 不加工不终止
+            self._feed_tool_message(call, outcome.content)
+        return None
+
+    def _feed_tool_message(self, call: ToolCall, content: str) -> None:
+        """工具/检索内容进工作序列的唯一入口（M2.8 挂点②：不可信数据包裹将挂这里）。
+
+        tool_call_id 用模型侧 ToolCall.id（对话协议字段）——幂等键（事件 id）只进
+        ToolContext 与事件流，两种 id 严禁混用（§7 坑 6）。
+        """
+        self._turns.append(Message(role="tool", content=content, tool_call_id=call.id))
 
     async def _finish_text(self, turn: _LLMTurn) -> None:
         """文本收尾单点（M2.8 挂点③：流式句子缓冲与终局复检都将挂这里）。"""
