@@ -1,0 +1,35 @@
+{
+  "format_version": 1,
+  "session_id": "cs-demo-1",
+  "scopes": {
+    "main": [
+      {
+        "request_digest": {"tier": "standard", "message_count": 2},
+        "chunks": [
+          {"type": "text_delta", "text": "您的订单"},
+          {"type": "text_delta", "text": "已发货。"},
+          {"type": "usage", "model": "qwen-plus", "prompt_tokens": 12, "completion_tokens": 8, "cached": false},
+          {"type": "stop", "reason": "end_turn"}
+        ]
+      },
+      {
+        "request_digest": {"tier": "standard", "message_count": 4},
+        "chunks": [
+          {"type": "tool_call", "tool_call": {"id": "call-demo-1", "name": "demo_order_query", "arguments_json": "{\"order_id\": \"A-1001\"}"}},
+          {"type": "usage", "model": "qwen-plus", "prompt_tokens": 30, "completion_tokens": 15, "cached": false},
+          {"type": "stop", "reason": "tool_calls"}
+        ]
+      }
+    ],
+    "summary": [
+      {
+        "request_digest": {"tier": "fast", "message_count": 1},
+        "chunks": [
+          {"type": "text_delta", "text": "用户询问订单 A-1001 的物流，已告知发货。"},
+          {"type": "usage", "model": "qwen-flash", "prompt_tokens": 40, "completion_tokens": 12, "cached": false},
+          {"type": "stop", "reason": "end_turn"}
+        ]
+      }
+    ]
+  }
+}
