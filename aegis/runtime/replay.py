@@ -14,12 +14,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from aegis.gateway.schema import LLMChunk, LLMRequest, StopChunk, chunk_list_adapter
+from aegis.runtime.runtime import GatewayLike
 
 FORMAT_VERSION: int = 1
 """cassette 文件格式版本。字段语义变更时 +1 并保留旧加载路径（与事件 SCHEMA_VERSION 同哲学）。"""
@@ -123,3 +124,94 @@ class Cassette:
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(text, encoding="utf-8", newline="\n")
         os.replace(tmp, path)
+
+
+@runtime_checkable
+class SupportsScoped(Protocol):
+    """能出借作用域视图的网关（FakeGateway/Recorder）；真实网关不满足 → scoped_view 直通。"""
+
+    def scoped(self, scope: str) -> GatewayLike: ...
+
+
+def scoped_view(gateway: GatewayLike, scope: str) -> GatewayLike:
+    """统一取视图入口（D10）：组装方不做类型判断——能出借视图的出借，否则直通自身。
+
+    真实网关的"作用域"没有意义（每次调用都是真钱真流量），直通即正确语义。
+    """
+    if isinstance(gateway, SupportsScoped):
+        return gateway.scoped(scope)
+    return gateway
+
+
+class FakeGateway:
+    """cassette 回放器：L2 眼中与真网关同形（GatewayLike），LLM 由录制带扮演。
+
+    四道游标互不影响（C10）；裸 complete ≡ scoped("main")。每次回放一个新实例——
+    游标是消费进度，跨用例共享实例=错配之源。
+    start_cursors 给 M2.12 中断-恢复测试用：恢复段把某道游标推到第 k 号，
+    兑现"新 run 从道内第 k 号继续匹配"；重放被作废条目 = 设回 k-1。
+    """
+
+    def __init__(self, cassette: Cassette, *, start_cursors: Mapping[str, int] | None = None) -> None:
+        self._cassette = cassette
+        self._cursors: dict[str, int] = {s: 0 for s in SCOPES}
+        if start_cursors is not None:
+            for scope, at in start_cursors.items():
+                if scope not in SCOPES:
+                    raise ValueError(f"start_cursors 含未知道名 {scope!r}——合法四道为 {list(SCOPES)}")
+                recorded = len(cassette.scopes.get(scope, ()))
+                if not 0 <= at <= recorded:
+                    raise ValueError(
+                        f"start_cursors[{scope!r}]={at} 越界——该道已录 {recorded} 条（合法 0..{recorded}）"
+                    )
+                self._cursors[scope] = at
+
+    def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
+        return self._replay("main", req)
+
+    def scoped(self, scope: str) -> GatewayLike:
+        if scope not in SCOPES:
+            raise ValueError(f"未知道名 {scope!r}——合法四道为 {list(SCOPES)}（C10）")
+        return _FakeScopedView(self, scope)
+
+    def remaining(self) -> dict[str, int]:
+        """各道未消费条数——排障与 assert_exhausted 的数据源。"""
+        return {s: len(self._cassette.scopes.get(s, ())) - self._cursors[s] for s in SCOPES}
+
+    def assert_exhausted(self) -> None:
+        """录了没放完 = 行为轨迹变短，也是漂移（D14：M2.12 强断言必调，普通单测可选）。"""
+        leftovers = {s: n for s, n in self.remaining().items() if n > 0}
+        if leftovers:
+            raise AssertionError(f"cassette 未放完：各道剩余 {leftovers}")
+
+    async def _replay(self, scope: str, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
+        """回放一条：校验会话 → 取道内当前条目 → 先推进游标（D6）→ 原样产出。"""
+        if req.session_id != self._cassette.session_id:
+            raise CassetteMismatch(
+                f"session_id 失配：期望 {self._cassette.session_id!r}，请求带 {req.session_id!r}"
+                f"（scope={scope}；L2 发出的请求必带 session_id——m2.6 §2.2 对齐要求）；"
+                f"request_digest={request_digest(req)}"
+            )
+        entries: tuple[CassetteEntry, ...] = self._cassette.scopes.get(scope, ())
+        i = self._cursors[scope]
+        if i >= len(entries):
+            raise CassetteMismatch(
+                f"{scope} 道耗尽：已录 {len(entries)} 条，本次是该道第 {i + 1} 次调用——"
+                f"多出来的调用就是行为漂移（C10）；request_digest={request_digest(req)}"
+            )
+        # D6：先推进游标再 yield——消费方首块后挂断也算一次调用（与真实调用语义一致），
+        # 半途 break 不会导致下次重复回放同一条目（静默错配之源）
+        self._cursors[scope] = i + 1
+        for chunk in entries[i].chunks:
+            yield chunk
+
+
+class _FakeScopedView:
+    """某一道的窄视图：消费方只看到 GatewayLike 形状，游标记账在宿主 FakeGateway。"""
+
+    def __init__(self, host: FakeGateway, scope: str) -> None:
+        self._host = host
+        self._scope = scope
+
+    def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
+        return self._host._replay(self._scope, req)
