@@ -302,3 +302,46 @@ async def test_context_budget_wired_into_executor(db_session_factory, make_sessi
     assert result.payload["injected"].startswith("（工具结果超预算，以下为摘要）")
     assert "要点：演示数据一批。" in result.payload["injected"]
     assert events[-1].payload["reason"] == "completed"
+
+
+async def test_second_run_continues_seq_with_fresh_run_id(db_session_factory, make_session) -> None:
+    """交付③·X5 + 单写者接续：同会话第二次 run——seq 接旧流尾递增（EventWriter.open 读流尾），
+    run_id 每次启动新生成且 run 内一致。"""
+    await make_session("lf-10")
+    first = await _run_collect(db_session_factory, "lf-10", "第一轮回答。")
+    second_gateway = FakeGateway(_text_cassette("lf-10", "第二轮回答。"))
+    runtime = AgentRuntime(second_gateway, db_session_factory)
+    second = [e async for e in runtime.run(_SPEC, "lf-10", "再问一句")]
+    assert second[0].seq == first[-1].seq + 1
+    assert len({e.run_id for e in first}) == 1
+    assert len({e.run_id for e in second}) == 1
+    assert first[0].run_id != second[0].run_id
+
+
+async def test_multiple_tool_calls_one_turn_run_in_order(db_session_factory, make_session, demo_registry) -> None:
+    """交付③·D20：一轮多工具调用顺序逐个执行（无并行）——事件次序与调用次序一致、配对各自闭合。"""
+    await make_session("lf-11")
+    spec = AgentSpec(system_prompt="你是演示客服。", tools=demo_registry.specs())
+    gateway = FakeGateway(
+        _cassette(
+            "lf-11",
+            _tool_turn(
+                _call("c1", "demo_order_query", '{"order_id": "A-1"}'),
+                _call("c2", "demo_ticket_create", '{"title": "催发货"}'),
+            ),
+            _text_turn("已查询订单并创建工单。"),
+        )
+    )
+    runtime = AgentRuntime(gateway, db_session_factory)
+    events = [e async for e in runtime.run(spec, "lf-11", "查订单并建工单")]
+    gateway.assert_exhausted()
+    tool_events = [e for e in events if e.type in (EventType.TOOL_CALL, EventType.TOOL_RESULT)]
+    assert [e.type for e in tool_events] == [
+        EventType.TOOL_CALL,
+        EventType.TOOL_RESULT,
+        EventType.TOOL_CALL,
+        EventType.TOOL_RESULT,
+    ]
+    called = [e.payload["tool_name"] for e in tool_events if e.type is EventType.TOOL_CALL]
+    assert called == ["demo_order_query", "demo_ticket_create"]
+    assert events[-1].payload["reason"] == "completed"

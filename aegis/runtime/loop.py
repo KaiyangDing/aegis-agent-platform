@@ -19,6 +19,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from aegis.core.tokens import estimate_tokens
+from aegis.gateway.errors import (
+    BudgetExceeded,
+    GatewayExhausted,
+    GatewayOverloadedError,
+    GatewayRejected,
+    GatewayStreamInterrupted,
+    TenantQuotaExceeded,
+)
 from aegis.gateway.schema import (
     LLMRequest,
     Message,
@@ -232,7 +240,60 @@ class AgentLoop:
                 yield event
 
             started = time.monotonic()
-            turn = await self._llm_step(messages)  # 交付③：网关异常矩阵（§4.4）将包在这一步外
+            try:
+                turn = await self._llm_step(messages)
+            except (GatewayExhausted, GatewayOverloadedError) as exc:
+                # §4.4 组一（闸门 #2 的 LLM 半边浮出面，C1）：deadline 耗尽/本地过载 = 步作废；
+                # "降级分支"在 M2.7 定义为兜底话术 + 终止（03:49 未展开处的填补）
+                cause = "gateway_exhausted" if isinstance(exc, GatewayExhausted) else "gateway_overloaded"
+                await self._fail_llm_step(
+                    TerminationReason.STEP_TIMEOUT,
+                    cause=cause,
+                    detail=str(exc),
+                    fallback=FALLBACK_STEP_FAILED,
+                )
+                for event in self._events.drain():
+                    yield event
+                return
+            except (BudgetExceeded, TenantQuotaExceeded) as exc:
+                # §4.4 组二（D9）：三级预算共用终止原因，cause 区分层级（L2 预检不带 cause）
+                cause = "l1_request_budget" if isinstance(exc, BudgetExceeded) else "l1_tenant_quota"
+                await self._fail_llm_step(
+                    TerminationReason.TOKEN_BUDGET_EXCEEDED,
+                    cause=cause,
+                    detail=str(exc),
+                    fallback=FALLBACK_BUDGET,
+                )
+                for event in self._events.drain():
+                    yield event
+                return
+            except GatewayRejected as exc:
+                # C6：确定性拒绝 = 配置/协议 bug 信号——不发任何兜底话术（I9），
+                # 不许被话术掩盖；detail 带错误文本（L1 已在源头打码）
+                await self._fail_llm_step(
+                    TerminationReason.GATEWAY_REJECTED,
+                    cause="gateway_rejected",
+                    detail=str(exc),
+                    fallback=None,
+                )
+                for event in self._events.drain():
+                    yield event
+                return
+            except GatewayStreamInterrupted as exc:
+                # D10 作废重发：已收 chunk 全部丢弃（不入上下文、不计 token），配对 interrupted
+                # 后 continue——重发消耗迭代数，max_iterations 天然兜底；进程死掉的半截归 M2.10。
+                # 不接 GatewayError 基类：ProviderError 泄漏是 bug 信号，必须裸炸（§7 坑 5）
+                await self._events.append(
+                    EventType.LLM_RESULT,
+                    {
+                        "iteration": self._iteration,
+                        "status": "interrupted",
+                        "detail": f"{exc}；死因：{exc.__cause__!r}",
+                    },
+                )
+                for event in self._events.drain():
+                    yield event
+                continue
             output_est = _estimate_turn_output(turn)
             await self._events.append(
                 EventType.LLM_RESULT,
@@ -431,6 +492,23 @@ class AgentLoop:
             EventType.ASSISTANT_MESSAGE,
             {"content": turn.text, "token_usage": turn.usage_completion},
         )
+
+    async def _fail_llm_step(
+        self,
+        reason: TerminationReason,
+        *,
+        cause: str,
+        detail: str,
+        fallback: str | None,
+    ) -> None:
+        """§4.4 终止型异常的统一收尾：先配对 llm_result(failed)——I6 在进程内不留孤儿
+        llm_call，"有 call 无 result"留给真崩溃（M2.10 判据）——再走 _terminate；
+        cause 随 llm_result 与 loop_terminated 两处留痕。"""
+        await self._events.append(
+            EventType.LLM_RESULT,
+            {"iteration": self._iteration, "status": "failed", "cause": cause, "detail": detail},
+        )
+        await self._terminate(reason, detail=detail, fallback=fallback, cause=cause)
 
     async def _terminate(
         self,
