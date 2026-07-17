@@ -1,0 +1,10 @@
+﻿== kill -9 崩溃恢复实录  session=kill9-1784329226 ==
+子进程已被 kill（pid=41696），工具执行中、副作用未落账
+[断言0] 会话卡在 running（尸体形态）: PASS
+reaper 认领：recovered=('kill9-1784329226',) abandoned=()
+[断言1] 副作用恰一次（账本键 ['885608cb875946fd9a58eeaf9316bbe8']，tool_result 键 ['885608cb875946fd9a58eeaf9316bbe8']）: PASS
+[断言2] 事件 seq 连续 1..9: PASS
+[断言3] 合法终止（loop_terminated/completed）: PASS
+[断言4] recovery_count 归零且 run_state=idle: PASS
+事件总数 9；恢复段起点 seq=5
+== 结论：全部 PASS —— 断点续跑成立，无重复副作用 ==
