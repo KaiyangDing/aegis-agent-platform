@@ -11,7 +11,8 @@ from aegis.runtime.events import SCHEMA_VERSION, AgentEvent, EventType
 
 
 def test_event_type_values_are_stable() -> None:
-    """14 类值快照（03 §5 表；M2.2 已按 C8 增 summary_updated）。再加成员先让这里红、过口径再改。"""
+    """15 类值快照（03 §5 表；M2.2 按 C8 增 summary_updated，M2.8 按 D6 增 guardrail_triggered）。
+    再加成员先让这里红、过口径再改。"""
     assert {e.value for e in EventType} == {
         "user_message",
         "assistant_message",
@@ -27,6 +28,7 @@ def test_event_type_values_are_stable() -> None:
         "loop_terminated",
         "handoff",
         "summary_updated",
+        "guardrail_triggered",
     }
 
 

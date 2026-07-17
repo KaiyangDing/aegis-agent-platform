@@ -149,6 +149,7 @@ class ContextBuilder:
         system_prompt: str,
         user_input: str,
         working: Sequence[Message] = (),
+        entry_notice: str | None = None,
     ) -> list[Message]:
         """按 D12 次序编译：system → 记忆 → [摘要 → 旧轮（交付②）] → 检索 → 当前 user → working。"""
         # ① system 层：固定不可挤占——超预算没有合法降级，那是 L3 配置 bug（D15 fail-loud）
@@ -180,6 +181,11 @@ class ContextBuilder:
                 out.append(Message(role="system", content=_RETRIEVAL_HEADER + packed))
 
         # ⑤ 当前用户消息：恒保留、绝不被挤出——挤掉它 = 答非所问（D11）
+        if entry_notice is not None:
+            # M2.8 D9：入口打标随当前 user 相邻注入（固定模板不占层预算，短文本由
+            # C25 余量消化；user_message 事件保持用户原文，事实源纯净——与滚动摘要
+            # "摘要服务 prompt、events 原文兜底"同一哲学）
+            out.append(Message(role="system", content=entry_notice))
         out.append(Message(role="user", content=user_input))
 
         # ⑥ 工具结果层：层聚合超预算走确定性折叠（单条收缩已归 M2.4 executor，D6）

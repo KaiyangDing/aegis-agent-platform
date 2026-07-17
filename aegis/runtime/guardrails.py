@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aegis.gateway.schema import LLMRequest, Message, TextDelta
 
@@ -521,3 +521,44 @@ class OutputGuard:
                     continue  # C23：规范化后等于允许清单值 = 本人数据，放行
                 return GuardHit("pii", rule.name, _mask_excerpt(candidate))
         return None
+
+
+# ---- 交付③：审计事件 payload 构造器（loop 一行调用；键集与值进回放断言）----
+
+
+def entry_audit_payload(verdict: EntryVerdict) -> dict[str, Any] | None:
+    """入口审计 payload：需要审计（HIGH 拒答 / MEDIUM 打标 / fail-open 发生）才返回 dict。
+
+    disposition 单条承载主处置，classifier_error 以键存在与否表达 fail-open——
+    MEDIUM + fail-open 不拆两条事件（信息不丢，序列更紧凑；m2.8 §4.3"可各一条"取单条形态）。
+    """
+    if verdict.suspicion is Suspicion.HIGH:
+        disposition = "refused"
+    elif verdict.suspicion is Suspicion.MEDIUM:
+        disposition = "tagged"
+    elif verdict.classifier_error is not None:
+        disposition = "classifier_fail_open"
+    else:
+        return None
+    payload: dict[str, Any] = {
+        "stage": "entry",
+        "disposition": disposition,
+        "suspicion": verdict.suspicion.value,
+        "rules": list(verdict.matched_rules),
+    }
+    if verdict.classifier_error is not None:
+        payload["classifier_error"] = verdict.classifier_error
+    return payload
+
+
+def output_audit_payload(hit: GuardHit, *, stage: str) -> dict[str, Any]:
+    """出口审计 payload。stage="stream"（流中截断）→ truncated；"final"（终局替换）→ final_replaced。"""
+    if stage not in ("stream", "final"):
+        raise ValueError(f"stage 须为 stream/final 之一，得到 {stage!r}")
+    return {
+        "stage": stage,
+        "disposition": "truncated" if stage == "stream" else "final_replaced",
+        "kind": hit.kind,
+        "rule": hit.rule,
+        "excerpt": hit.excerpt,
+    }

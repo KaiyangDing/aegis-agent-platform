@@ -40,6 +40,15 @@ from aegis.gateway.schema import (
 from aegis.runtime.context import ContextBuilder
 from aegis.runtime.events import AgentEvent, EventType
 from aegis.runtime.executor import OutcomeKind, ToolExecutor
+from aegis.runtime.guardrails import (
+    REFUSAL_TEMPLATE,
+    SAFE_REPLY,
+    UNTRUSTED_NOTICE,
+    Guardrails,
+    entry_audit_payload,
+    output_audit_payload,
+    wrap_untrusted,
+)
 from aegis.runtime.spec import AgentSpec, TerminationReason
 from aegis.runtime.store import EventWriter
 
@@ -157,6 +166,7 @@ class AgentLoop:
         tenant_id: str,
         token_seed: int,
         cancel_event: asyncio.Event | None = None,
+        guards: Guardrails | None = None,
     ) -> None:
         self._spec = spec
         self._gateway = gateway  # 已是 main 作用域视图（D15：摘要走各自的道，勿混）
@@ -165,6 +175,10 @@ class AgentLoop:
         self._executor = executor
         self._tenant_id = tenant_id
         self._cancel_event = cancel_event
+        self._guards = guards if guards is not None else Guardrails()  # 未注入 = 纯规则库（分类器归组装方）
+        # M2.8 D5：不可信包裹的 system 层声明恒随 prompt——此处拼接一次，spec.system_prompt
+        # 本体不动；FakeGateway 匹配键不含 prompt 哈希，既有 cassette 不失配
+        self._system_prompt = f"{spec.system_prompt}\n\n{UNTRUSTED_NOTICE}"
         self._policy = spec.policy
         # 工具说明书一次转换：顺序 = spec.tools 注入序（回放确定性的一环）
         self._tool_specs = [
@@ -184,7 +198,24 @@ class AgentLoop:
         await self._events.append(EventType.USER_MESSAGE, {"content": user_input})
         for event in self._events.drain():
             yield event
-        # M2.8 挂点①：入口守卫（注入规则库 + 可疑度分类）将插在这里——本步只留位
+
+        # M2.8 挂点①：入口守卫——HIGH 拒答（不调 LLM）/ MEDIUM 打标 / fail-open 只审计
+        verdict = await self._guards.check_input(user_input)
+        entry_payload = entry_audit_payload(verdict)
+        if entry_payload is not None:
+            await self._events.append(EventType.GUARDRAIL_TRIGGERED, entry_payload)
+        if verdict.refuse:
+            await self._terminate(
+                TerminationReason.COMPLETED,  # D10：防线不是第七道闸门，拒答是正常完成
+                detail=f"入口守卫拒答：rules={list(verdict.matched_rules)}",
+                fallback=REFUSAL_TEMPLATE,
+            )
+            for event in self._events.drain():
+                yield event
+            return
+        entry_notice = verdict.notice  # MEDIUM → 固定打标文本随本轮 prompt（D9）；其余 None
+        for event in self._events.drain():
+            yield event
 
         while True:
             # 闸门 #6 取消（P1）：每次 LLM 调用前查一次；工具前的检查点在 _run_tools（交付②）
@@ -212,9 +243,10 @@ class AgentLoop:
 
             # 组装上下文（M2.5）：滚动摘要可能在 build 内发 summary_updated——随后一并外流
             messages = await self._builder.build(
-                system_prompt=self._spec.system_prompt,
+                system_prompt=self._system_prompt,
                 user_input=user_input,
                 working=self._turns,
+                entry_notice=entry_notice,
             )
             input_est = _estimate_messages(messages)
 
@@ -467,15 +499,19 @@ class AgentLoop:
                     return TerminationReason.PROTOCOL_VIOLATION
 
             outcome = await self._executor.execute(call.name, call.arguments_json)
+            # M2.8 挂点②：五结局 content 一律包裹后回填（D5）——OK 含真实外部数据必须包；
+            # ERROR/RESULT_UNKNOWN 可能转述下游异常文本，同样按不可信处理。
+            # 事件 payload 已由 executor 存原文（X4），包裹只在 prompt 注入面
+            wrapped = wrap_untrusted(outcome.content, source=f"tool:{outcome.tool_name}")
             if outcome.kind is OutcomeKind.NEEDS_APPROVAL:
                 # M2.9: 在此替换为挂起路径（创建审批单 → awaiting_approval → run 可下线）。
                 # 本步按 K3 拍板回填继续：不碰 approvals/run_state/事件，
                 # 不发明会在 M2.9 报废的临时 payload（回放资产不折旧）
-                self._feed_tool_message(call, outcome.content)
+                self._feed_tool_message(call, wrapped)
                 continue
             # 其余四结局同样回填继续（§4.3 表）：错误文本是模型的观察结果，它通常能自我修正；
             # RESULT_UNKNOWN 的 content 已含"禁止重试"话术（X1），loop 不加工不终止
-            self._feed_tool_message(call, outcome.content)
+            self._feed_tool_message(call, wrapped)
         return None
 
     def _feed_tool_message(self, call: ToolCall, content: str) -> None:
@@ -487,7 +523,36 @@ class AgentLoop:
         self._turns.append(Message(role="tool", content=content, tool_call_id=call.id))
 
     async def _finish_text(self, turn: _LLMTurn) -> None:
-        """文本收尾单点（M2.8 挂点③：流式句子缓冲与终局复检都将挂这里）。"""
+        """文本收尾单点（M2.8 挂点③）：出口守卫聚合检查 + 终局复检，然后才写 assistant_message。
+
+        M2.7 实装为聚合后单发（08 §5.10）——OutputGuard 确定性不变量（逐字符 ≡ 整段）
+        保证聚合 feed 与 M3.10 逐帧 feed 行为一致；_llm_step 消费结构零改动（流中
+        提前退出会丢 ToolCallChunk/UsageChunk，工具轮误判 + 计量蒸发）。
+        """
+        guard = self._guards.output_guard(
+            # 片段集用 spec 原文：UNTRUSTED_NOTICE 是公开机制说明，模型复述无害不设防
+            system_prompt=self._spec.system_prompt,
+            tool_names=[spec.name for spec in self._tool_specs],
+            owned_values=self._spec.owned_values,
+        )
+        visible = guard.feed(turn.text) + guard.flush()
+        if guard.hit is not None:
+            # 流中命中（D11 止损）：已放行前缀 + 安全话术，命中句起全部丢弃
+            await self._events.append(EventType.GUARDRAIL_TRIGGERED, output_audit_payload(guard.hit, stage="stream"))
+            await self._events.append(
+                EventType.ASSISTANT_MESSAGE,
+                {"content": visible + SAFE_REPLY, "guardrail_truncated": True, "token_usage": turn.usage_completion},
+            )
+            return
+        final_hits = guard.final_check(visible)
+        if final_hits:
+            # 终局命中：M2 时点 assistant_message 尚未写出，可整条替换（D11）
+            await self._events.append(EventType.GUARDRAIL_TRIGGERED, output_audit_payload(final_hits[0], stage="final"))
+            await self._events.append(
+                EventType.ASSISTANT_MESSAGE,
+                {"content": SAFE_REPLY, "guardrail_truncated": True, "token_usage": turn.usage_completion},
+            )
+            return
         await self._events.append(
             EventType.ASSISTANT_MESSAGE,
             {"content": turn.text, "token_usage": turn.usage_completion},

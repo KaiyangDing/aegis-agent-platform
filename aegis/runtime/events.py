@@ -19,7 +19,7 @@ SCHEMA_VERSION = 1
 
 
 class EventType(StrEnum):
-    """事件类型全集（03 §5 表，14 类——C8 于 2026-07-09 增 summary_updated）。
+    """事件类型全集（03 §5 表，15 类——C8 增 summary_updated、M2.8 D6 增 guardrail_triggered）。
     值进 events 表与回放断言，快照测试钉死；加成员必须显式过口径后更新快照。"""
 
     USER_MESSAGE = "user_message"
@@ -36,6 +36,7 @@ class EventType(StrEnum):
     SUMMARY_UPDATED = "summary_updated"
     LOOP_TERMINATED = "loop_terminated"
     HANDOFF = "handoff"
+    GUARDRAIL_TRIGGERED = "guardrail_triggered"
 
 
 @dataclass(frozen=True, slots=True)

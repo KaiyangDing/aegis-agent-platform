@@ -21,6 +21,7 @@ from aegis.gateway.schema import LLMChunk, LLMRequest, Message, TextDelta
 from aegis.runtime.context import ContextBuilder
 from aegis.runtime.events import AgentEvent, EventType
 from aegis.runtime.executor import ToolExecutor
+from aegis.runtime.guardrails import Classifier, Guardrails, build_classifier
 from aegis.runtime.loop import AgentLoop, _Tap
 from aegis.runtime.spec import AgentSpec
 from aegis.runtime.store import EventRecord, EventWriter, SessionFactory, SessionRecord
@@ -148,6 +149,12 @@ class AgentRuntime:
             # D15②：滚动摘要钩子显式接线——漏接则 summarize=None、摘要永不触发（M2.11 必挂）
             summarize=_make_summarizer(scoped_view(self._gateway, "summary"), tenant_id, session_id),
         )
+        # M2.8：防线组装。分类器按租户开通（spec.entry_classifier，2026-07-17 拍板默认关）——
+        # 规则库无条件在场；开通后走 guard 作用域视图（C10 四道分计数，回放/录制自动分道）
+        classify: Classifier | None = None
+        if spec.entry_classifier:
+            classify = build_classifier(scoped_view(self._gateway, "guard"), tenant_id=tenant_id, session_id=session_id)
+        guards = Guardrails(classify=classify)
         loop = AgentLoop(
             spec,
             scoped_view(self._gateway, "main"),
@@ -157,6 +164,7 @@ class AgentRuntime:
             tenant_id=tenant_id,
             token_seed=token_seed,
             cancel_event=self._cancel_event,
+            guards=guards,
         )
         async for event in loop.run(user_input):
             yield event

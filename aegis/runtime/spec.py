@@ -145,6 +145,12 @@ class AgentSpec:
     model_tier: Tier = "standard"
     sub_agent_policy: SubAgentPolicy = SubAgentPolicy.DISABLED
     tenant_config: Mapping[str, Any] = field(default_factory=dict)
+    # C23：用户本人 PII 允许清单（手机/地址等），出口守卫据此区分"本人数据 vs 他人泄漏"；
+    # L3 每会话装配时注入真实值（M3.8），M2 测试用演示值
+    owned_values: tuple[str, ...] = ()
+    # M2.8 拍板（2026-07-17）：入口 LLM 分类器按租户开通、默认关——规则库是无条件底座，
+    # 分类是增强层（C34），开关归注入面（与 sub_agent_policy 同型）；M3.8 从租户配置读
+    entry_classifier: bool = False
 
     def __post_init__(self) -> None:
         if not self.system_prompt.strip():
