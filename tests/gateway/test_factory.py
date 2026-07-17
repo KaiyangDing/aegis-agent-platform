@@ -25,14 +25,15 @@ def test_build_gateway_wires_settings_end_to_end(fresh_settings):
     m.setenv("TENANT_RATE", "1.5")
     m.setenv("CACHE_TTL_SECONDS", "0")
     m.setenv("FAULT_INJECTION_RATE", "0.3")
-    m.setenv("FAULT_INJECTION_TARGETS", '["bailian:qwen-plus"]')
+    m.setenv("FAULT_INJECTION_TARGETS", '["bailian:qwen3.7-plus"]')
     gw = build_gateway()
     assert gw._cache is None  # ttl=0 → 缓存关闭
     assert gw._limits.provider_rate == 3.5
     assert gw._limits.tenant_rate == 1.5  # 两个维度没有被搬运时调换
-    assert gw._fault_targets == frozenset({"bailian:qwen-plus"})
+    assert gw._fault_targets == frozenset({"bailian:qwen3.7-plus"})
     assert set(gw._routes) == {"fast", "standard", "strong"}
-    assert gw._routes["fast"][0] == Candidate("bailian", "qwen-flash")
+    # 2026-07-16 模型池变更（账号额度）：fast 首选 qwen3.7-plus——钉住 config 默认路由的搬运
+    assert gw._routes["fast"][0] == Candidate("bailian", "qwen3.7-plus")
 
 
 def test_build_gateway_cache_on_when_ttl_positive(fresh_settings):

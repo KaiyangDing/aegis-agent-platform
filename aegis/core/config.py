@@ -31,10 +31,12 @@ class Settings(BaseSettings):
     # —— 网关路由与限流（M1.9）——
     # 档位 → 候选链（"provider:model"，按序 fallback）。环境变量可用 JSON 覆盖。
     model_routes: dict[str, list[str]] = {
-        # fast 链末位升档到 qwen-plus：兑现 02 §4"fast 耗尽可升档"的承诺（审计加固 A）
-        "fast": ["bailian:qwen-flash", "bailian:qwen-turbo", "bailian:qwen-plus"],
-        "standard": ["bailian:qwen-plus", "bailian:deepseek-v3"],
-        "strong": ["bailian:qwen-max", "bailian:deepseek-v3"],
+        # 2026-07-16 模型池变更（账号额度）：仅 qwen3.7-plus / qwen3.7-max / glm5.2 可用。
+        # glm5.2 接任 deepseek-v3 的"同平台异族容灾"角色；fast 档失去专属廉价模型，
+        # 与 standard 同链（首选 qwen3.7-plus；若 glm5.2 价更低可调序——改这里不改代码）
+        "fast": ["bailian:qwen3.7-plus", "bailian:glm5.2"],
+        "standard": ["bailian:qwen3.7-plus", "bailian:glm5.2"],
+        "strong": ["bailian:qwen3.7-max", "bailian:glm5.2"],
     }
     # gt=0：速率写成 0 会让 Lua 里 capacity/rate 溢出，环境变量写错要在启动时炸
     provider_rate: float = Field(default=8.0, gt=0)  # 每供应商出站 QPS（演示值，压测后调）
@@ -46,11 +48,9 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 300  # 精确缓存 TTL；0 = 关闭缓存
     # 模型单价（元/千 token，[输入, 输出]）——演示值，以百炼价目页为准；调价改这里不改代码
     model_prices: dict[str, list[float]] = {
-        "qwen-flash": [0.00015, 0.0015],
-        "qwen-turbo": [0.0003, 0.0006],
-        "qwen-plus": [0.0008, 0.002],
-        "qwen-max": [0.0024, 0.0096],
-        "deepseek-v3": [0.002, 0.008],
+        "qwen3.7-plus": [0.0008, 0.002],  # 演示值——务必按百炼价目页更新
+        "qwen3.7-max": [0.0024, 0.0096],  # 演示值——同上
+        "glm5.2": [0.002, 0.008],  # 演示值——同上
     }
     tenant_monthly_token_budget: int = 0  # 租户月度 token 预算；0=关闭，超额抛 BudgetExceeded
     request_token_budget: int = 0  # 单请求 token 预算（估算口径）；0=关闭（§10.1 #1，三级预算 L1 级）
