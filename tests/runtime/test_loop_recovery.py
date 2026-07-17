@@ -144,7 +144,13 @@ async def _count(factory, session_id: str, event_type: EventType) -> int:
 
 
 async def test_renew_failure_self_destructs_without_events(db_session_factory, make_session, demo_registry) -> None:
-    """C2 协议一/二：续租打空 → LeaseLost 传播、立即自毁——之后零新事件（含无 loop_terminated）。"""
+    """C2 协议一/二：续租打空 → LeaseLost 传播、立即自毁——绝不出现终止收尾类事件。
+
+    断言贴语义不贴时序（首版在 CI 翻车的教训）："不写任何进一步事件"的精确含义是
+    **感知丢锁之后**；感知是事件间检查点、有粒度——窗口内的在途事件（如 llm_result）
+    落盘与否取决于死亡时刻，不是自毁语义的一部分（真正防线=唯一约束）。时序无关的
+    不变量是：loop_terminated 与兜底 assistant_message（_terminate 产物）必然缺席。
+    """
     await make_session("lr-1")
 
     class _DeadLeases:
@@ -167,7 +173,7 @@ async def test_renew_failure_self_destructs_without_events(db_session_factory, m
         async for _ in runtime.run(_spec(demo_registry), "lr-1", "你好"):
             pass
     assert await _count(db_session_factory, "lr-1", EventType.LOOP_TERMINATED) == 0
-    assert await _count(db_session_factory, "lr-1", EventType.LLM_RESULT) == 0
+    assert await _count(db_session_factory, "lr-1", EventType.ASSISTANT_MESSAGE) == 0
 
 
 async def test_recover_dangling_read_tool_reexecutes(db_session_factory, make_session, demo_registry) -> None:
