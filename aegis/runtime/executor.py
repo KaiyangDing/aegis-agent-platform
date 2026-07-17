@@ -223,6 +223,78 @@ class ToolExecutor:
         await self._events.append(EventType.TOOL_RESULT, payload)
         return ToolOutcome(OutcomeKind.OK, name, content, tool_call_id=call_event.id)
 
+    async def reexecute(self, name: str, args: Mapping[str, Any], *, tool_call_id: str) -> ToolOutcome:
+        """恢复期窄入口（m2.10 §4.4-3b）：以既有 write-ahead 事件 id 重执行半截调用。
+
+        跳过生命周期①–④——参数是事实源里当年校验过的快照，不再"不信"；write-ahead
+        已存在，**绝不产生第二把幂等键**（重新走 execute 会再写 tool_call = 两把钥匙，
+        下游去重当场失效——X1 同族）。复用 ⑤⑥⑦：超时取更严、结果规范化、终局事件
+        以原 id 写入（投影 _finish_invocation 恰好闭合原 RUNNING 行）。
+        读/写都走本入口：读的安全来自无副作用，写的安全来自原幂等键透传下游去重。
+        """
+        tool = self._tools.get(name)
+        started = time.monotonic()
+        if tool is None:
+            # 恢复期工具缺失（spec 演进）：以原 id 写 tool_error 闭合投影，错误回填模型
+            await self._append_error(tool_call_id, "恢复期工具缺失：不在当前 AgentSpec.tools", started, 0)
+            return ToolOutcome(
+                OutcomeKind.ERROR,
+                name,
+                f"工具 {name} 在恢复时已不可用（已从注入面移除），操作未执行",
+                tool_call_id=tool_call_id,
+            )
+        ctx = ToolContext(
+            tenant_id=self._tenant_id,
+            user_id=self._user_id,
+            session_id=self._events.session_id,
+            run_id=self._events.run_id,
+            tool_call_id=tool_call_id,  # 原幂等键——恢复期同一逻辑调用恰一把钥匙
+        )
+        timeout_s = self._default_timeout_s if tool.timeout_s is None else min(tool.timeout_s, self._default_timeout_s)
+        attempts_allowed = 1 + (tool.retries if tool.side_effect is SideEffect.READ else 0)
+        kwargs = dict(args)
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                async with asyncio.timeout(timeout_s):
+                    result = await tool.handler(ctx, **kwargs)
+                break
+            except TimeoutError:
+                if tool.side_effect is SideEffect.WRITE:
+                    await self._append_error(tool_call_id, "执行超时，结果不明", started, attempt - 1)
+                    return ToolOutcome(
+                        OutcomeKind.RESULT_UNKNOWN,
+                        name,
+                        f"操作结果未知：{name} 执行超时，副作用可能已在下游生效。"
+                        "禁止重试该操作——请先用查询类工具确认实际状态，再决定下一步。",
+                        tool_call_id=tool_call_id,
+                    )
+                if attempt >= attempts_allowed:
+                    await self._append_error(tool_call_id, f"执行超时（>{timeout_s:g}s）", started, attempt - 1)
+                    return self._fail(name, f"工具执行超时（>{timeout_s:g}s）", tool_call_id=tool_call_id)
+                await self._sleep(0.2 * attempt)
+            except Exception as e:
+                if attempt >= attempts_allowed:
+                    await self._append_error(tool_call_id, str(e), started, attempt - 1)
+                    return self._fail(name, f"工具执行失败：{e}", tool_call_id=tool_call_id)
+                await self._sleep(0.2 * attempt)
+
+        self._fail_streaks.pop(name, None)
+        raw_text = json.dumps(result, ensure_ascii=False, default=str)
+        payload: dict[str, Any] = {
+            "tool_call_id": tool_call_id,
+            "result": result,
+            "latency_ms": _elapsed_ms(started),
+            "retry_count": attempt - 1,
+        }
+        content = raw_text
+        if estimate_tokens(raw_text) > self._result_token_budget:
+            content = await self._shrink(raw_text, payload)
+        payload["digest"] = _digest(content)
+        await self._events.append(EventType.TOOL_RESULT, payload)
+        return ToolOutcome(OutcomeKind.OK, name, content, tool_call_id=tool_call_id)
+
     def _fail(self, name: str, content: str, *, tool_call_id: str | None = None) -> ToolOutcome:
         """记连败账：达到上限即禁用，并在当次回填里宣告——模型立刻知道该改道。"""
         streak = self._fail_streaks.get(name, 0) + 1

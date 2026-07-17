@@ -14,13 +14,14 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from contextlib import aclosing, asynccontextmanager
+from contextlib import aclosing, asynccontextmanager, suppress
 from typing import Any, Protocol
 from uuid import uuid4
 
 from sqlalchemy import select
 
-from aegis.core.locks import SessionLock, hold_session_lock
+from aegis.core.config import Settings, get_settings
+from aegis.core.locks import SessionLock, SessionLockHeld, hold_session_lock
 from aegis.gateway.schema import LLMChunk, LLMRequest, Message, TextDelta, ToolCall
 from aegis.runtime.context import ContextBuilder
 from aegis.runtime.events import AgentEvent, EventType
@@ -34,10 +35,13 @@ from aegis.runtime.store import (
     ApprovalStore,
     EventRecord,
     EventWriter,
+    LeaseLost,
+    LeaseStore,
     RunState,
     SessionFactory,
     SessionRecord,
     SessionStateStore,
+    default_lease_owner,
 )
 from aegis.runtime.tools import ToolRegistry
 
@@ -100,6 +104,23 @@ async def _maybe_lock(lock: SessionLock | None, session_id: str) -> AsyncIterato
             yield None
 
 
+async def _renew_lease_forever(
+    leases: LeaseStore,
+    session_id: str,
+    *,
+    owner: str,
+    generation: int,
+    ttl_s: float,
+    interval_s: float,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """续租心跳（C2 协议一）：打空即抛 LeaseLost——终态不重试（协议二），自毁由消费方执行。"""
+    while True:
+        await sleep(interval_s)
+        if not await leases.renew(session_id, owner=owner, generation=generation, ttl_s=ttl_s):
+            raise LeaseLost(f"session={session_id} gen={generation} 续租打空——所有权已旁落")
+
+
 def _match_call(pending: Sequence[ToolCall], matched: list[bool], name: str, args: Mapping[str, Any]) -> int | None:
     """按 (工具名, 参数语义) 在未配对的声明里找调用——模型侧 id 不落工具事件，语义配对是唯一通路。"""
     for i, call in enumerate(pending):
@@ -116,9 +137,9 @@ def _match_call(pending: Sequence[ToolCall], matched: list[bool], name: str, arg
 def _rebuild_working(
     records: Sequence[tuple[str, Mapping[str, Any]]],
     *,
-    approved_name: str,
-    approved_args: Mapping[str, Any],
-    approved_content: str,
+    fill_name: str | None = None,
+    fill_args: Mapping[str, Any] | None = None,
+    fill_content: str | None = None,
 ) -> list[Message]:
     """K2② 定案：从挂起 run 的事件流重建工作消息序列（模型视界的事实级还原）。
 
@@ -126,9 +147,11 @@ def _rebuild_working(
     tool_call（write-ahead）暂存 (name, args)，随后的 tool_result/tool_error 据此配对——
     content 优先取 injected（X4 收缩产物留痕正为回放重建），否则 dumps(result) 与
     executor 同参逐字节一致；tool_error 近似还原（事件存短错误文本，包装前缀不落盘）。
-    审批 call 配执行结果；其余未配对（弃置/打断）补话术防悬空 tool_calls 被上游 400。
+    fill_*（m2.10 偏差 #6 泛化）：给指定未配对 call 喂结果内容——审批场景喂批准执行
+    结果、崩溃恢复悬挂工具支喂 reexecute 结果；无 fill 目标（悬挂 LLM/干净缝）传 None。
+    其余未配对（弃置/打断）补话术防悬空 tool_calls 被上游 400。
     全部 tool 消息重过 wrap_untrusted（确定性函数，与挂起前 loop 行为一致——M2.8 挂点②）。
-    已知边界（计划偏差块 #1）：打断/纠错话术无事件不重建——恢复保事实不保字节。
+    已知边界（m2.9 偏差 #1）：打断/纠错话术无事件不重建——恢复保事实不保字节。
     """
     working: list[Message] = []
     pending: list[ToolCall] = []
@@ -167,9 +190,10 @@ def _rebuild_working(
                 _feed(index, f"工具执行失败：{payload['error']}")
             last_exec = None
 
-    index = _match_call(pending, matched, approved_name, approved_args)
-    if index is not None:
-        _feed(index, approved_content)
+    if fill_name is not None and fill_args is not None and fill_content is not None:
+        index = _match_call(pending, matched, fill_name, fill_args)
+        if index is not None:
+            _feed(index, fill_content)
     for i in range(len(pending)):
         if not matched[i]:
             _feed(i, _DISCARDED_NOTE)
@@ -188,6 +212,7 @@ class AgentRuntime:
         run_id_factory: Callable[[], str] | None = None,
         lock: SessionLock | None = None,
         precheck: PrecheckHook | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self._gateway = gateway
         self._session_factory = session_factory
@@ -195,8 +220,11 @@ class AgentRuntime:
         self._run_id_factory = run_id_factory or (lambda: uuid4().hex)
         self._lock = lock  # None=无锁直通；M3.2 必须显式传 build_session_lock()
         self._precheck = precheck
+        self._settings = settings or get_settings()  # 测试注入小值实例（config.py:72 指引，绕 lru_cache）
         self._session_state = SessionStateStore(session_factory)
         self._approvals = ApprovalStore(session_factory)
+        self._leases = LeaseStore(session_factory)
+        self._lease_owner = default_lease_owner()
 
     async def run(self, spec: AgentSpec, session_id: str, user_input: str) -> AsyncIterator[AgentEvent]:
         """驱动一次完整 Agent 循环。本签名是 M2 的对外契约，定死不再动。"""
@@ -212,11 +240,13 @@ class AgentRuntime:
         approval_id 形参即 M2.10 泛化后的最终形：非 None=审批分诊（本步实装）；
         None=崩溃恢复分诊（M2.10 接入，暂 NotImplementedError 占位）。
         """
-        if approval_id is None:
-            raise NotImplementedError("崩溃恢复分诊随 M2.10 接入（m2.9 §4.3d 占位）")
         async with _maybe_lock(self._lock, session_id):
-            async for event in self._resume_locked(spec, session_id, approval_id):
-                yield event
+            if approval_id is None:
+                async for event in self._recover_locked(spec, session_id):
+                    yield event
+            else:
+                async for event in self._resume_locked(spec, session_id, approval_id):
+                    yield event
 
     async def _identity_and_seed(self, session_id: str) -> tuple[str, str, int]:
         """读 sessions 行取身份（P2：无行拒绝起跑）+ 从事件流重建 token 计数种子（D8）。"""
@@ -293,12 +323,139 @@ class AgentRuntime:
         # M2 时点 fail-loud，M3.2 消息准入层将按 run_state 映射业务提示
         if not await self._session_state.transition(session_id, expected=RunState.IDLE, to=RunState.RUNNING):
             raise RuntimeError(f"会话 {session_id} 不在 idle（等待审批或运行中），本次 run 拒绝启动")
+        generation = await self._leases.acquire(session_id, owner=self._lease_owner, ttl_s=self._settings.lease_ttl_s)
+        if generation is None:
+            # T1 赢了但租约在他人手里 = 异常态；不回滚状态（running+无租约的幽灵由
+            # reaper 的 NULL 扫描兜住，m2.10 偏差 #5），按锁被占同款信号退出
+            raise SessionLockHeld(f"会话 {session_id} 的租约在另一副本手里")
         writer = await EventWriter.open(self._session_factory, session_id, run_id)
         tap = _Tap(writer)
         loop, _ = self._assemble(
             spec, tap, tenant_id=tenant_id, user_id=user_id, session_id=session_id, token_seed=token_seed
         )
-        async for event in loop.run(user_input):
+        async for event in self._pump_with_lease(session_id, generation, loop.run(user_input)):
+            yield event
+
+    async def _pump_with_lease(
+        self, session_id: str, generation: int, events: AsyncGenerator[AgentEvent]
+    ) -> AsyncIterator[AgentEvent]:
+        """租约伴飞：续租任务后台跑，事件间检查其死活；正常耗尽才 release。
+
+        续租打空 → LeaseLost 从此处抛出，立即停止消费源生成器（aclosing 关它，
+        不再写任何事件——含 loop_terminated：新 owner 已在接续 seq，再写必撞唯一约束）；
+        异常路径不 release（所有权已旁落，围栏终态 C2）。
+        """
+        renew = asyncio.create_task(
+            _renew_lease_forever(
+                self._leases,
+                session_id,
+                owner=self._lease_owner,
+                generation=generation,
+                ttl_s=self._settings.lease_ttl_s,
+                interval_s=self._settings.lease_renew_interval_s,
+            )
+        )
+        try:
+            async with aclosing(events):
+                async for event in events:
+                    if renew.done():
+                        renew.result()  # 心跳只以异常终结：此处必抛 LeaseLost
+                    yield event
+        finally:
+            renew.cancel()
+            with suppress(asyncio.CancelledError):
+                await renew
+        if not await self._leases.release(session_id, owner=self._lease_owner, generation=generation):
+            logger.warning(
+                "release 打空：session=%s gen=%s（租约已旁落，事件与置位已由前序完成）", session_id, generation
+            )
+
+    async def _recover_locked(self, spec: AgentSpec, session_id: str) -> AsyncIterator[AgentEvent]:
+        """崩溃恢复分诊（m2.10 §4.4，approval_id=None 分支）：读事实 → 四支判定 → 续跑。
+
+        前提：调用方已发现该会话租约过期（reaper steal 后经钩子进来，或人工触发）。
+        四支（按序最多命中一支）：
+        a. 尾事件 loop_terminated —— 上一 run 已收尾只是 T4 没置回：仅修状态，零新事件；
+        b. 悬挂 tool_call（有 write-ahead 无终局）—— executor.reexecute 凭原事件 id 重执行
+           （恰一把幂等键），结果经 fill 配对进重建序列续跑；
+        c. 悬挂 llm_call（I6：无任何 llm_result 配对）—— 作废重发：不补旧事件，
+           续跑自然产生新 llm_call（显式接受重生成文本不同，03:149-151）；
+        d. 干净缝 —— 直接续跑。
+        """
+        generation = await self._leases.acquire(session_id, owner=self._lease_owner, ttl_s=self._settings.lease_ttl_s)
+        if generation is None:
+            raise SessionLockHeld(f"会话 {session_id} 的租约在另一副本手里")
+        async with self._session_factory() as s:
+            rows = (
+                await s.execute(
+                    select(
+                        EventRecord.id,
+                        EventRecord.run_id,
+                        EventRecord.type,
+                        EventRecord.payload,
+                        EventRecord.schema_version,
+                    )
+                    .where(EventRecord.session_id == session_id)
+                    .order_by(EventRecord.seq)
+                )
+            ).all()
+        if not rows:
+            raise ValueError(f"会话 {session_id} 无任何事件——没有可恢复的 run")
+        for r in rows:
+            if r.schema_version != 1:
+                raise RuntimeError(f"事件 schema_version={r.schema_version} 无解析器（当前仅 v1）")
+
+        # a 支：上一 run 其实已收尾——仅修状态（T4 补翻 + 清租约），零新事件
+        if rows[-1].type == EventType.LOOP_TERMINATED.value:
+            if not await self._session_state.transition(session_id, expected=RunState.RUNNING, to=RunState.IDLE):
+                logger.warning("崩溃修状态：running→idle 翻转失败（可能已被处理）：session=%s", session_id)
+            if not await self._leases.release(session_id, owner=self._lease_owner, generation=generation):
+                logger.warning("崩溃修状态：release 打空：session=%s", session_id)
+            return
+
+        # 扫描配对（全会话）：悬挂 tool_call 判定（K2/I6）。半截 llm_call（c 支）不必显式
+        # 判定——它与干净缝（d 支）的处置相同：都不补事件、直接续跑（作废重发的"作废"
+        # 就是无为，重发由续跑的新 llm_call 自然兑现），两支在代码上合流
+        open_calls: dict[str, Mapping[str, Any]] = {}
+        for r in rows:
+            if r.type == EventType.TOOL_CALL.value:
+                open_calls[r.id] = r.payload
+            elif r.type in (EventType.TOOL_RESULT.value, EventType.TOOL_ERROR.value):
+                open_calls.pop(r.payload.get("tool_call_id", ""), None)
+        if len(open_calls) > 1:
+            raise RuntimeError(
+                f"会话 {session_id} 悬挂 tool_call 多于一个（{len(open_calls)}）——单写者顺序执行下不可能"
+            )
+
+        crash_run_id = rows[-1].run_id
+        crash_rows = [(r.type, r.payload) for r in rows if r.run_id == crash_run_id]
+        user_input = next((r.payload["content"] for r in reversed(rows) if r.type == EventType.USER_MESSAGE.value), "")
+        tenant_id, user_id, token_seed = await self._identity_and_seed(session_id)
+        run_id = self._run_id_factory()  # 恢复用新 run_id（X5），seq 接续旧流
+        writer = await EventWriter.open(self._session_factory, session_id, run_id)
+        tap = _Tap(writer)
+        loop, executor = self._assemble(
+            spec, tap, tenant_id=tenant_id, user_id=user_id, session_id=session_id, token_seed=token_seed
+        )
+
+        fill_name: str | None = None
+        fill_args: Mapping[str, Any] | None = None
+        fill_content: str | None = None
+        if open_calls:
+            # b 支：凭原事件 id 重执行（reexecute 以原 id 写终局，投影闭合原 RUNNING 行）
+            call_event_id, call_payload = next(iter(open_calls.items()))
+            outcome = await executor.reexecute(
+                call_payload["tool_name"], call_payload["args"], tool_call_id=call_event_id
+            )
+            fill_name = call_payload["tool_name"]
+            fill_args = call_payload["args"]
+            fill_content = outcome.content
+        # c 支（悬挂 llm_call：last_llm_call > last_llm_result）与 d 支（干净缝）都不补事件，
+        # 区别仅在语义：c 的旧调用被作废（重发消耗新 llm_call），d 本来就没有半截
+        for event in tap.drain():
+            yield event
+        working = _rebuild_working(crash_rows, fill_name=fill_name, fill_args=fill_args, fill_content=fill_content)
+        async for event in self._pump_with_lease(session_id, generation, loop.resume_run(user_input, working)):
             yield event
 
     async def _load_suspension(
@@ -339,6 +496,9 @@ class AgentRuntime:
             session_id, expected=RunState.AWAITING_APPROVAL, to=RunState.RUNNING
         ):
             return
+        generation = await self._leases.acquire(session_id, owner=self._lease_owner, ttl_s=self._settings.lease_ttl_s)
+        if generation is None:
+            raise SessionLockHeld(f"会话 {session_id} 的租约在另一副本手里")
         run_id = self._run_id_factory()  # 恢复用新 run_id（D16/X5），seq 经 open 接续旧流
         writer = await EventWriter.open(self._session_factory, session_id, run_id)
         tap = _Tap(writer)
@@ -368,9 +528,9 @@ class AgentRuntime:
                 yield event
             user_input, approved_name, approved_args, run_rows = await self._load_suspension(session_id, approval_id)
             working = _rebuild_working(
-                run_rows, approved_name=approved_name, approved_args=approved_args, approved_content=approved_content
+                run_rows, fill_name=approved_name, fill_args=approved_args, fill_content=approved_content
             )
-            async for event in loop.resume_run(user_input, working):
+            async for event in self._pump_with_lease(session_id, generation, loop.resume_run(user_input, working)):
                 yield event
             return
 
@@ -393,5 +553,7 @@ class AgentRuntime:
         )
         if not await self._session_state.transition(session_id, expected=RunState.RUNNING, to=RunState.IDLE):
             logger.warning("恢复终止时 running→idle 翻转失败：session=%s", session_id)
+        if not await self._leases.release(session_id, owner=self._lease_owner, generation=generation):
+            logger.warning("拒绝路径 release 打空：session=%s", session_id)
         for event in tap.drain():
             yield event

@@ -14,7 +14,7 @@ import json
 import logging
 import time
 from collections import deque
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -208,7 +208,7 @@ class AgentLoop:
         self._repeat_key: tuple[str, str] | None = None  # 闸门 #4 状态（交付②消费）
         self._repeat_streak = 0
 
-    async def run(self, user_input: str) -> AsyncIterator[AgentEvent]:
+    async def run(self, user_input: str) -> AsyncGenerator[AgentEvent]:
         """驱动循环至终止。产出事件 ≡ 本 run 落盘事件，且 yield 序 ≡ seq 序（I4）。"""
         # user_message 恒为首事件（I5；D19——单写者不变量下由 loop 写入，API 层不旁路）
         await self._events.append(EventType.USER_MESSAGE, {"content": user_input})
@@ -233,7 +233,7 @@ class AgentLoop:
         async for event in self._main_loop(user_input, entry_notice=verdict.notice):
             yield event
 
-    async def resume_run(self, user_input: str, working: Sequence[Message]) -> AsyncIterator[AgentEvent]:
+    async def resume_run(self, user_input: str, working: Sequence[Message]) -> AsyncGenerator[AgentEvent]:
         """恢复续跑入口（M2.9，K2② 定案）：不写 user_message（原输入已在旧 run 落盘）、
         不过入口守卫（历史输入挂起前已检）、工作序列由恢复单入口从事件流重建注入，
         主循环与 run() 完全同一条路径——M2.10 崩溃恢复复用本入口（计划内恢复 =
@@ -243,7 +243,7 @@ class AgentLoop:
         async for event in self._main_loop(user_input):
             yield event
 
-    async def _main_loop(self, user_input: str, *, entry_notice: str | None = None) -> AsyncIterator[AgentEvent]:
+    async def _main_loop(self, user_input: str, *, entry_notice: str | None = None) -> AsyncGenerator[AgentEvent]:
         """主循环（run 与 resume_run 共用）。"""
         while True:
             # 闸门 #6 取消（P1）：每次 LLM 调用前查一次；工具前的检查点在 _run_tools（交付②）
