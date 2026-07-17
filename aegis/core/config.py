@@ -58,12 +58,25 @@ class Settings(BaseSettings):
     fault_injection_targets: list[str] = []  # 注入目标，如 ["bailian:qwen-plus"]
     fault_injection_mode: Literal["error", "hang", "midstream"] = "error"  # 注入形态（评审 C1 补挂起/断流盲区）
 
+    # —— 恢复调度（M2.10）——
+    lease_ttl_s: float = Field(default=60.0, gt=0)  # 会话租约时长（P1：TTL=3×续租间隔，容两次续租失败）
+    lease_renew_interval_s: float = Field(default=20.0, gt=0)  # loop 续租间隔
+    reaper_interval_s: float = Field(default=30.0, gt=0)  # beat 扫描周期（P2：发现延迟上界≈TTL+周期=90s）
+    recovery_limit: int = Field(default=3, ge=1)  # C9：恢复次数上限（P3）
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
         # 与 parse_routes 同一哲学：配置错误在启动时炸，不在凌晨的流量里炸（审计加固 B）
         if self.app_env == "prod" and self.fault_injection_rate > 0:
             raise ValueError("prod 环境禁止开启故障注入（fault_injection_rate 必须为 0）")
+        return self
+
+    @model_validator(mode="after")
+    def _lease_renew_shorter_than_ttl(self) -> "Settings":
+        # 间隔 ≥ TTL 意味着租约必然在两次心跳之间过期——配置错误启动时炸（审计加固 B 哲学）
+        if self.lease_renew_interval_s >= self.lease_ttl_s:
+            raise ValueError("lease_renew_interval_s 必须小于 lease_ttl_s（否则租约必然过期）")
         return self
 
 

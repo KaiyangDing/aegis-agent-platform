@@ -9,9 +9,11 @@ events 是状态恢复的唯一事实源；messages / tool_invocations / session
 from __future__ import annotations
 
 import asyncio
+import os
+import socket
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, cast
 
@@ -26,6 +28,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    or_,
     select,
     update,
 )
@@ -511,3 +514,157 @@ class SessionStateStore:
                     .values(run_state=to.value)
                 )
         return _rowcount(res) == 1
+
+
+class LeaseLost(RuntimeError):
+    """租约旁落（C2 协议一/二）：续租或释放 CAS 打空——所有权已被 reaper 转移。
+
+    终态，绝不退避重试（与 EventWriteFenced 同语义）；当前 loop 立即自毁、
+    不再写任何事件，恢复交给持有新租约的一方。
+    """
+
+
+def default_lease_owner() -> str:
+    """副本 id（03 §5"lease_owner = 副本 id"）：主机名+pid 在容器多副本与本地进程两形态下唯一且可读。"""
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+class LeaseStore:
+    """sessions 租约列的 CAS 原语（C2 围栏）。与 ApprovalStore/SessionStateStore 同族：
+    条件进 WHERE、输赢看 rowcount/RETURNING；时钟一律 DB 钟 func.now()（now 可注入——C7 先例）。
+
+    全部方法的 SET 不碰 run_state——状态翻转唯一路径是 SessionStateStore.transition
+    （m2.9 §4.4 迁移表；reaper 抢租 running→running 不构成翻转）。
+    generation 只增不减；(owner, generation) 二元组是一次持有的完整生命周期凭据。
+    """
+
+    def __init__(self, factory: SessionFactory) -> None:
+        self._factory = factory
+
+    async def acquire(self, session_id: str, *, owner: str, ttl_s: float, now: datetime | None = None) -> int | None:
+        """抢租：running 且（无租约 / 已过期 / 租约列 NULL / 同 owner 重入）→ generation +1。
+
+        同 owner 重入（m2.10 偏差 #4）支撑 reaper steal→钩子→resume 的同进程交接；
+        None = 活租约在他人手里 / 行非 running / 行不存在（P2 防线保证调用时行存在）。
+        """
+        cutoff = func.now() if now is None else now
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(SessionRecord)
+                    .where(
+                        SessionRecord.id == session_id,
+                        SessionRecord.run_state == RunState.RUNNING.value,
+                        or_(
+                            SessionRecord.lease_owner.is_(None),
+                            SessionRecord.lease_expires_at.is_(None),
+                            SessionRecord.lease_expires_at <= cutoff,
+                            SessionRecord.lease_owner == owner,
+                        ),
+                    )
+                    .values(
+                        lease_owner=owner,
+                        lease_expires_at=cutoff + timedelta(seconds=ttl_s),
+                        lease_generation=SessionRecord.lease_generation + 1,
+                    )
+                    .returning(SessionRecord.lease_generation)
+                )
+        return res.scalar_one_or_none()
+
+    async def renew(self, session_id: str, *, owner: str, generation: int, ttl_s: float) -> bool:
+        """续租心跳：打空即围栏信号（C2 协议二：终态，调用方绝不退避重试）。"""
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(SessionRecord)
+                    .where(
+                        SessionRecord.id == session_id,
+                        SessionRecord.lease_owner == owner,
+                        SessionRecord.lease_generation == generation,
+                    )
+                    .values(lease_expires_at=func.now() + timedelta(seconds=ttl_s))
+                )
+        return _rowcount(res) == 1
+
+    async def release(self, session_id: str, *, owner: str, generation: int) -> bool:
+        """干净收尾：清租约双列 + recovery_count 归零（m2.10 3.2#4：干净收尾证明会话不是毒的）。
+
+        不碰 run_state——终止/挂起的置位由调用方以相邻调用走 SessionStateStore.transition。
+        """
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(SessionRecord)
+                    .where(
+                        SessionRecord.id == session_id,
+                        SessionRecord.lease_owner == owner,
+                        SessionRecord.lease_generation == generation,
+                    )
+                    .values(lease_owner=None, lease_expires_at=None, recovery_count=0)
+                )
+        return _rowcount(res) == 1
+
+    async def steal_expired(
+        self, session_id: str, *, owner: str, ttl_s: float, recovery_limit: int, now: datetime | None = None
+    ) -> int | None:
+        """reaper 抢租：running + 过期（或 NULL 幽灵）+ 未超限 → generation +1 且 recovery_count +1。
+
+        赢家恰一个（两个 reaper 赛跑输家打空拿 None——可能被抢走，也可能已超限，
+        由调用方随后 mark_failed 分辨）。
+        """
+        cutoff = func.now() if now is None else now
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(SessionRecord)
+                    .where(
+                        SessionRecord.id == session_id,
+                        SessionRecord.run_state == RunState.RUNNING.value,
+                        or_(
+                            SessionRecord.lease_expires_at.is_(None),
+                            SessionRecord.lease_expires_at <= cutoff,
+                        ),
+                        SessionRecord.recovery_count < recovery_limit,
+                    )
+                    .values(
+                        lease_owner=owner,
+                        lease_expires_at=cutoff + timedelta(seconds=ttl_s),
+                        lease_generation=SessionRecord.lease_generation + 1,
+                        recovery_count=SessionRecord.recovery_count + 1,
+                    )
+                    .returning(SessionRecord.lease_generation)
+                )
+        return res.scalar_one_or_none()
+
+    async def clear_lease(self, session_id: str) -> None:
+        """C9 终局清扫：T5 翻转（SessionStateStore.transition RUNNING→FAILED）的**赢家**随后清租约列。
+
+        恰一次判定权在 transition（状态机 CAS 本就该是判定点，m2.10 偏差 #7）——本方法
+        执行时行已 failed、无竞争者，无需 CAS；先翻状态再清列再写审计事件，崩在缝上 =
+        failed 带残留租约列/无审计事件（接受，无谎言方向）。
+        """
+        async with self._factory() as s:
+            async with s.begin():
+                await s.execute(
+                    update(SessionRecord)
+                    .where(SessionRecord.id == session_id)
+                    .values(lease_owner=None, lease_expires_at=None)
+                )
+
+    async def list_expired(self, *, now: datetime | None = None, limit: int = 100) -> list[str]:
+        """reaper 扫描（走 ix_sessions_reaper）：running + 过期或 NULL 幽灵（偏差 #5），NULL 最优先。"""
+        cutoff = func.now() if now is None else now
+        async with self._factory() as s:
+            res = await s.execute(
+                select(SessionRecord.id)
+                .where(
+                    SessionRecord.run_state == RunState.RUNNING.value,
+                    or_(
+                        SessionRecord.lease_expires_at.is_(None),
+                        SessionRecord.lease_expires_at <= cutoff,
+                    ),
+                )
+                .order_by(SessionRecord.lease_expires_at.asc().nullsfirst())
+                .limit(limit)
+            )
+        return list(res.scalars().all())
