@@ -5,6 +5,7 @@ requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.18.5",
     "asyncpg>=0.31.0",
+    "celery>=5.5",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
@@ -42,6 +43,10 @@ python_version = "3.13"
 check_untyped_defs = true
 explicit_package_bases = true   # ← 新增：按目录路径推导模块名，允许多目录同名文件（如两个 conftest.py）
 
+[[tool.mypy.overrides]]
+module = "celery.*"             # celery 5.5 无 py.typed（m2.10 §7 陷阱 5，实测后加）
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"          # async def 的测试函数自动被识别，不用逐个加装饰器
@@ -54,6 +59,7 @@ name = "分层依赖只能向下：apps → runtime → gateway → core"
 type = "layers"
 layers = [
     "aegis.apps",
+    "aegis.workers",
     "aegis.runtime",
     "aegis.gateway",
     "aegis.core",
