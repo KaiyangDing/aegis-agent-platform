@@ -153,11 +153,11 @@ async def test_stream_interrupted_voids_step_and_retries_next_iteration(db_sessi
 async def test_infra_error_propagates_out_of_run(db_session_factory, make_session) -> None:
     """§4.4 末行：基础设施故障不翻译不兜底——EventStoreUnavailable 裸穿出 run()。
 
-    工厂前 2 次放行（身份读取、EventWriter.open 读流尾），写 user_message 起永久断连：
-    短退避重试 3 次耗尽 → 原始异常出面；事件零落盘（半截不留）。
+    工厂前 3 次放行（身份读取、T1 状态翻转——M2.9 新增、EventWriter.open 读流尾），
+    写 user_message 起永久断连：短退避重试 3 次耗尽 → 原始异常出面；事件零落盘（半截不留）。
     """
     await make_session("lg-7")
-    dying = _DyingFactory(db_session_factory, healthy=2)
+    dying = _DyingFactory(db_session_factory, healthy=3)
     runtime = AgentRuntime(_RaisingGateway(GatewayExhausted("不该被调到")), dying)
     with pytest.raises(EventStoreUnavailable):
         async for _ in runtime.run(_SPEC, "lg-7", "你好"):

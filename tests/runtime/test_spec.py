@@ -50,7 +50,7 @@ def test_termination_gates_are_exactly_six() -> None:
 
 
 def test_loop_policy_defaults_match_design_doc() -> None:
-    """03 §2 表的默认阈值列。"""
+    """03 §2 表的默认阈值列（approval_ttl_s 随 M2.9 P1 拍板方案 A 加入，默认 1 小时）。"""
     p = LoopPolicy()
     assert p.max_iterations == 10
     assert p.llm_step_timeout_s == 90.0
@@ -58,6 +58,7 @@ def test_loop_policy_defaults_match_design_doc() -> None:
     assert p.session_token_budget == 50_000
     assert p.repeat_call_limit == 3
     assert p.protocol_retry_limit == 2
+    assert p.approval_ttl_s == 3600.0
 
 
 def test_loop_policy_is_frozen() -> None:
@@ -74,6 +75,7 @@ def test_loop_policy_is_frozen() -> None:
         ("session_token_budget", 0),
         ("repeat_call_limit", 0),
         ("protocol_retry_limit", -1),
+        ("approval_ttl_s", 0.0),
     ],
 )
 def test_loop_policy_rejects_invalid(field: str, bad: float) -> None:

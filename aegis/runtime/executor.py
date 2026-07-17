@@ -114,7 +114,7 @@ class ToolExecutor:
         self._fail_streaks: dict[str, int] = {}
         self._disabled: set[str] = set()
 
-    async def execute(self, name: str, arguments_json: str) -> ToolOutcome:
+    async def execute(self, name: str, arguments_json: str, *, approved: bool = False) -> ToolOutcome:
         tool = self._tools.get(name)
         if tool is None:
             # 幻觉工具名：没有工具可禁用，不进连败账；点名可用工具帮模型改口
@@ -142,8 +142,10 @@ class ToolExecutor:
             except ValidationError as e:
                 return self._fail(name, f"参数校验失败：{e}")
 
-        # 生命周期③ 风险闸门：确定性安全闸门，fail-closed——评估不了绝不放行
-        if tool.risk_policy is not None:
+        # 生命周期③ 风险闸门：确定性安全闸门，fail-closed——评估不了绝不放行。
+        # approved=True 是审批单通行证（M2.9 D5）：仅恢复单入口在批准后使用——
+        # 不豁免则恢复重执行必再命中闸门 → 无限挂起；参数校验①不豁免（回炉重验）
+        if not approved and tool.risk_policy is not None:
             try:
                 needs_approval = tool.risk_policy(args, self._tenant_config)
             except Exception as e:

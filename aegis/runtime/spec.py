@@ -50,7 +50,9 @@ class LoopPolicy:
     """循环约束——03 §2 终止条件表"默认阈值"列的家。
 
     frozen：策略在一次 run 内不许中途改动，要变换新实例（回放一致性依赖此语义）。
-    只承载闸门 1–5 的阈值；闸门 6（取消/HITL）由外部信号与审批单 expires_at 触发（M2.9）。
+    承载闸门 1–5 的阈值与闸门 6 的审批时限（approval_ttl_s：审批单 expires_at 的
+    生成依据，M2.9 P1 拍板——审批时限本质是租户级策略，M3.1 起 L3 经租户配置注入）。
+    闸门 6 的触发源（取消信号/审批终局）仍在外部。
     llm_step_timeout_s 即传给网关的 deadline——与 L1 三段超时的嵌套约束由
     deadline 传播保证，不做人肉算术校验（C1 裁决）。
     session_token_budget 的生产值由 L3 从租户配置注入（M3.1），默认值只服务
@@ -64,6 +66,7 @@ class LoopPolicy:
     session_token_budget: int = 50_000
     repeat_call_limit: int = 3
     protocol_retry_limit: int = 2
+    approval_ttl_s: float = 3600.0
 
     def __post_init__(self) -> None:
         if self.max_iterations < 1:
@@ -78,6 +81,8 @@ class LoopPolicy:
             raise ValueError(f"repeat_call_limit 须 ≥1，得到 {self.repeat_call_limit}")
         if self.protocol_retry_limit < 0:
             raise ValueError(f"protocol_retry_limit 须 ≥0，得到 {self.protocol_retry_limit}")
+        if self.approval_ttl_s <= 0:
+            raise ValueError(f"approval_ttl_s 须 >0，得到 {self.approval_ttl_s}")
 
 
 @dataclass(frozen=True, slots=True)

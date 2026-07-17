@@ -1,8 +1,9 @@
 """M2.7 交付②③：终止闸门用例集（plans/m2.7 §5.2，§4.7 表逐行）。
 
-交付②落闸门 #4（重复调用：D4 规范形 / D5 连续计数 / I8 打断不留事件）、
-K3 占位与 D6 幻觉记账；交付③补齐闸门 #0(D18)/#1/#2 工具半边(X1)/#3(D8)/#5(D7)/#6(P1)
-与 reason 值集契约。零真实调用（00 §6.0）：FakeGateway 回放 + 本文件局部捕获替身。
+交付②落闸门 #4（重复调用：D4 规范形 / D5 连续计数 / I8 打断不留事件）与 D6 幻觉记账；
+交付③补齐闸门 #0(D18)/#1/#2 工具半边(X1)/#3(D8)/#5(D7)/#6(P1) 与 reason 值集契约。
+（K3 占位测试已随 M2.9 挂起链路接管而移除——该行为由 test_suspend_resume.py 接续。）
+零真实调用（00 §6.0）：FakeGateway 回放 + 本文件局部捕获替身。
 """
 
 from __future__ import annotations
@@ -10,8 +11,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Sequence
 from typing import Literal
-
-from sqlalchemy import func, select
 
 from aegis.gateway.schema import (
     LLMChunk,
@@ -26,7 +25,6 @@ from aegis.runtime.events import EventType
 from aegis.runtime.replay import Cassette, CassetteEntry, FakeGateway
 from aegis.runtime.runtime import AgentRuntime
 from aegis.runtime.spec import AgentSpec, LoopPolicy, TerminationReason
-from aegis.runtime.store import ApprovalRecord
 from aegis.runtime.tools import SideEffect, ToolContext, tool
 
 
@@ -143,37 +141,6 @@ async def test_varied_args_reset_repeat_streak(db_session_factory, make_session,
     fed = [m for req in gateway.requests for m in req.messages if m.role == "tool"]
     assert all("未被执行" not in m.content for m in fed)
     assert events[-1].payload["reason"] == "completed"
-
-
-async def test_needs_approval_placeholder_feeds_back(db_session_factory, make_session, demo_registry) -> None:
-    """K3 占位：NEEDS_APPROVAL 当普通观察结果回填继续——不开审批单、不写工具事件、不置状态。
-
-    风险闸门先于 write-ahead（03 §4 次序），所以连 tool_call 事件都没有；
-    挂起链路（审批单 + awaiting_approval）是 M2.9 的领地，本步 approvals 表必须零行。"""
-    await make_session("lt-4")
-    spec = AgentSpec(
-        system_prompt="你是演示客服。",
-        tools=demo_registry.specs(),
-        tenant_config={"approval_threshold": 200},
-    )
-    gateway = _CaptureGateway(
-        [
-            _tool_turn(_call("c1", "demo_refund_apply", '{"order_id": "A-1", "amount": 350}')),
-            _text_turn("这笔退款超过阈值，需要人工审批后才能执行。"),
-        ]
-    )
-    runtime = AgentRuntime(gateway, db_session_factory)
-    events = [e async for e in runtime.run(spec, "lt-4", "退 350 元")]
-    assert events[-1].payload["reason"] == "completed"
-    assert [e for e in events if e.type is EventType.TOOL_CALL] == []
-    feed = next(m for m in gateway.requests[1].messages if m.role == "tool")
-    assert feed.tool_call_id == "c1"
-    assert "审批" in feed.content
-    async with db_session_factory() as s:
-        count = (
-            await s.execute(select(func.count()).select_from(ApprovalRecord).where(ApprovalRecord.session_id == "lt-4"))
-        ).scalar_one()
-    assert count == 0
 
 
 async def test_hallucinated_tool_counts_as_violation(db_session_factory, make_session, demo_registry) -> None:

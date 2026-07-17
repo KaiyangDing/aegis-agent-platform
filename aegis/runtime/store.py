@@ -474,3 +474,40 @@ class ApprovalStore:
                     .returning(ApprovalRecord.id)
                 )
         return list(res.scalars().all())
+
+    async def attach_event(self, approval_id: str, *, event_id: str) -> bool:
+        """执行后回填审计链（ApprovalRecord.event_id"执行后回填"注释与 02 §3 口径兑现，M2.9 D15）。
+
+        CAS：WHERE event_id IS NULL——回填恰一次，重复调用拿 False（C11 同族）。
+        """
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(ApprovalRecord)
+                    .where(ApprovalRecord.id == approval_id, ApprovalRecord.event_id.is_(None))
+                    .values(event_id=event_id)
+                )
+        return _rowcount(res) == 1
+
+
+class SessionStateStore:
+    """sessions.run_state 的 CAS 原语（C11 同族：条件进 WHERE、输赢看 rowcount）。
+
+    只管一张表的真相；合法迁移图（谁能从哪到哪）见 plans/m2.9 §4.4——T1 idle→running
+    （run 启动）/ T2 running→awaiting_approval（挂起）/ T3 awaiting→running（恢复）/
+    T4 running→idle（终止）；T5 running→failed 随 M2.10。非法迁移由 expected 参数
+    机器拒绝，不存在"直接 SET"的入口。
+    """
+
+    def __init__(self, factory: SessionFactory) -> None:
+        self._factory = factory
+
+    async def transition(self, session_id: str, *, expected: RunState, to: RunState) -> bool:
+        async with self._factory() as s:
+            async with s.begin():
+                res = await s.execute(
+                    update(SessionRecord)
+                    .where(SessionRecord.id == session_id, SessionRecord.run_state == expected.value)
+                    .values(run_state=to.value)
+                )
+        return _rowcount(res) == 1

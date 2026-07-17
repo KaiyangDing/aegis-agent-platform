@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import uuid4
 
 from aegis.core.tokens import estimate_tokens
 from aegis.gateway.errors import (
@@ -50,7 +53,9 @@ from aegis.runtime.guardrails import (
     wrap_untrusted,
 )
 from aegis.runtime.spec import AgentSpec, TerminationReason
-from aegis.runtime.store import EventWriter
+from aegis.runtime.store import ApprovalStore, EventWriter, RunState, SessionStateStore
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     # 只为类型：runtime.py 反向 import 本模块组装 AgentLoop，真 import 会成环
@@ -84,6 +89,13 @@ def canonical_json(arguments_json: str) -> str:
     except json.JSONDecodeError:
         return arguments_json
     return json.dumps(parsed, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+class _Suspended:
+    """挂起哨兵（D2）：run 干净收尾但不终止——无 loop_terminated，锁释放后进程可下线。"""
+
+
+_SUSPENDED = _Suspended()
 
 
 class _Tap:
@@ -166,6 +178,8 @@ class AgentLoop:
         tenant_id: str,
         token_seed: int,
         cancel_event: asyncio.Event | None = None,
+        approvals: ApprovalStore,
+        session_state: SessionStateStore,
         guards: Guardrails | None = None,
     ) -> None:
         self._spec = spec
@@ -175,6 +189,8 @@ class AgentLoop:
         self._executor = executor
         self._tenant_id = tenant_id
         self._cancel_event = cancel_event
+        self._approvals = approvals
+        self._session_state = session_state
         self._guards = guards if guards is not None else Guardrails()  # 未注入 = 纯规则库（分类器归组装方）
         # M2.8 D5：不可信包裹的 system 层声明恒随 prompt——此处拼接一次，spec.system_prompt
         # 本体不动；FakeGateway 匹配键不含 prompt 哈希，既有 cassette 不失配
@@ -198,7 +214,6 @@ class AgentLoop:
         await self._events.append(EventType.USER_MESSAGE, {"content": user_input})
         for event in self._events.drain():
             yield event
-
         # M2.8 挂点①：入口守卫——HIGH 拒答（不调 LLM）/ MEDIUM 打标 / fail-open 只审计
         verdict = await self._guards.check_input(user_input)
         entry_payload = entry_audit_payload(verdict)
@@ -213,10 +228,23 @@ class AgentLoop:
             for event in self._events.drain():
                 yield event
             return
-        entry_notice = verdict.notice  # MEDIUM → 固定打标文本随本轮 prompt（D9）；其余 None
         for event in self._events.drain():
             yield event
+        async for event in self._main_loop(user_input, entry_notice=verdict.notice):
+            yield event
 
+    async def resume_run(self, user_input: str, working: Sequence[Message]) -> AsyncIterator[AgentEvent]:
+        """恢复续跑入口（M2.9，K2② 定案）：不写 user_message（原输入已在旧 run 落盘）、
+        不过入口守卫（历史输入挂起前已检）、工作序列由恢复单入口从事件流重建注入，
+        主循环与 run() 完全同一条路径——M2.10 崩溃恢复复用本入口（计划内恢复 =
+        灾难恢复同路径，03:161）。iteration 从 0 起：闸门 #1 是单 run 界，恢复次数
+        上限归 M2.10 的 recovery_count（C9）。"""
+        self._turns = list(working)
+        async for event in self._main_loop(user_input):
+            yield event
+
+    async def _main_loop(self, user_input: str, *, entry_notice: str | None = None) -> AsyncIterator[AgentEvent]:
+        """主循环（run 与 resume_run 共用）。"""
         while True:
             # 闸门 #6 取消（P1）：每次 LLM 调用前查一次；工具前的检查点在 _run_tools（交付②）
             if self._cancel_event is not None and self._cancel_event.is_set():
@@ -446,7 +474,7 @@ class AgentLoop:
             cached=bool(usage and usage.cached),
         )
 
-    async def _run_tools(self, turn: _LLMTurn) -> TerminationReason | None:
+    async def _run_tools(self, turn: _LLMTurn) -> TerminationReason | _Suspended | None:
         """工具分支（D20：顺序逐个执行，无并行）：闸门 #4/#6 检查点 + D6 幻觉记账 + 五结局回填。
 
         返回非 None = 已在内部 _terminate，run() 收尾外流后直接 return。
@@ -504,11 +532,36 @@ class AgentLoop:
             # 事件 payload 已由 executor 存原文（X4），包裹只在 prompt 注入面
             wrapped = wrap_untrusted(outcome.content, source=f"tool:{outcome.tool_name}")
             if outcome.kind is OutcomeKind.NEEDS_APPROVAL:
-                # M2.9: 在此替换为挂起路径（创建审批单 → awaiting_approval → run 可下线）。
-                # 本步按 K3 拍板回填继续：不碰 approvals/run_state/事件，
-                # 不发明会在 M2.9 报废的临时 payload（回放资产不折旧）
-                self._feed_tool_message(call, wrapped)
-                continue
+                # M2.9 挂起链路（§4.3c）：开单（approvals 先于事件出生，store.py:273）→
+                # approval_requested 事件 → T2 状态翻转 → 干净收尾（进程可下线）
+                approval_id = uuid4().hex
+                expires_at = datetime.now(UTC) + timedelta(seconds=self._policy.approval_ttl_s)
+                args_snapshot: dict[str, Any] = json.loads(call.arguments_json)  # D6：LLM 原始参数快照
+                await self._approvals.create(
+                    approval_id=approval_id,
+                    session_id=self._events.session_id,
+                    tenant_id=self._tenant_id,
+                    tool_name=outcome.tool_name,
+                    args=args_snapshot,
+                    expires_at=expires_at,
+                )
+                await self._events.append(
+                    EventType.APPROVAL_REQUESTED,
+                    {
+                        "approval_id": approval_id,
+                        "tool_name": outcome.tool_name,
+                        "args": args_snapshot,
+                        "expires_at": expires_at.isoformat(),  # datetime 不进 JSONB（坑 9）
+                    },
+                )
+                flipped = await self._session_state.transition(
+                    self._events.session_id, expected=RunState.RUNNING, to=RunState.AWAITING_APPROVAL
+                )
+                if not flipped:
+                    raise RuntimeError(
+                        f"会话 {self._events.session_id} 挂起时 T2 翻转失败——持锁单写者下不可能（bug 信号）"
+                    )
+                return _SUSPENDED
             # 其余四结局同样回填继续（§4.3 表）：错误文本是模型的观察结果，它通常能自我修正；
             # RESULT_UNKNOWN 的 content 已含"禁止重试"话术（X1），loop 不加工不终止
             self._feed_tool_message(call, wrapped)
@@ -594,3 +647,8 @@ class AgentLoop:
         if cause is not None:
             payload["cause"] = cause
         await self._events.append(EventType.LOOP_TERMINATED, payload)
+        # T4（M2.9/D20）：终止即归位 idle。持锁单写者下失败=状态机被旁路——响亮留痕不掀收尾
+        if not await self._session_state.transition(
+            self._events.session_id, expected=RunState.RUNNING, to=RunState.IDLE
+        ):
+            logger.warning("终止时 running→idle 翻转失败：session=%s", self._events.session_id)
