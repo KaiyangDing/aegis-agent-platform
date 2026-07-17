@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 import pytest
 
 from aegis.core.locks import (
+    FailoverSessionLock,
     RedisSessionLock,
     SessionLockHeld,
     hold_session_lock,
@@ -167,3 +168,78 @@ async def test_hold_releases_on_exit(r) -> None:
         async with hold_session_lock(lock, _SID):
             raise RuntimeError("测试炸")
     assert await r.get(_KEY) is None
+
+
+# ---- 交付②：FailoverSessionLock 粘滞切换（假后端 stub，无真实依赖）----
+
+
+class _FlakyLock:
+    """行为可编程的假后端：ok=正常授予 / busy=恒被占 / boom=恒抛异常；计数供粘滞断言。"""
+
+    def __init__(self, behavior: str = "ok") -> None:
+        self.behavior = behavior
+        self.acquire_calls = 0
+        self.release_calls = 0
+        self.held: set[str] = set()
+
+    async def acquire(self, session_id: str, owner_token: str, *, ttl_s: float = 30.0) -> bool:
+        self.acquire_calls += 1
+        if self.behavior == "boom":
+            raise ConnectionError("后端爆炸")
+        if self.behavior == "busy" or session_id in self.held:
+            return False
+        self.held.add(session_id)
+        return True
+
+    async def extend(self, session_id: str, owner_token: str, *, ttl_s: float = 30.0) -> bool:
+        return session_id in self.held
+
+    async def release(self, session_id: str, owner_token: str) -> bool:
+        self.release_calls += 1
+        self.held.discard(session_id)
+        return True
+
+
+async def test_failover_uses_fallback_when_primary_raises() -> None:
+    """primary 抛异常 → fallback 授予；release 按授予后端路由，绝不去 primary。"""
+    primary, fallback = _FlakyLock("boom"), _FlakyLock()
+    f = FailoverSessionLock(primary, fallback)
+    t = new_owner_token()
+    assert await f.acquire("fo-1", t) is True
+    assert fallback.held == {"fo-1"}
+    assert await f.release("fo-1", t) is True
+    assert fallback.release_calls == 1
+    assert primary.release_calls == 0
+
+
+async def test_failover_is_sticky_with_probe_window() -> None:
+    """降级粘滞：探针窗内不再触碰 primary；窗到期后一试即恢复、授予回到 primary。"""
+    primary, fallback = _FlakyLock("boom"), _FlakyLock()
+    f = FailoverSessionLock(primary, fallback, probe_interval_s=300.0)
+    await f.acquire("fo-2a", new_owner_token())
+    assert primary.acquire_calls == 1
+    await f.acquire("fo-2b", new_owner_token())
+    assert primary.acquire_calls == 1  # 窗内粘滞：不为挂掉的后端付连接延迟
+    primary.behavior = "ok"
+    f._next_probe = 0.0  # 手动拨探针窗到期（monotonic 恒大于 0）
+    t = new_owner_token()
+    assert await f.acquire("fo-2c", t) is True
+    assert primary.acquire_calls == 2  # 探针放行触到 primary
+    assert primary.held == {"fo-2c"}  # 恢复后授予在 primary
+
+
+async def test_failover_propagates_when_both_dead() -> None:
+    """双后端全抛 → 异常原样上抛——Redis + PG 双灭 = 服务不可用，不吞不兜。"""
+    f = FailoverSessionLock(_FlakyLock("boom"), _FlakyLock("boom"))
+    with pytest.raises(ConnectionError):
+        await f.acquire("fo-3", new_owner_token())
+
+
+async def test_failover_busy_is_false_not_degrade() -> None:
+    """primary 正常返回 False（被占）→ 不降级、不碰 fallback——占用是结果不是故障。"""
+    primary, fallback = _FlakyLock("busy"), _FlakyLock()
+    f = FailoverSessionLock(primary, fallback)
+    assert await f.acquire("fo-4", new_owner_token()) is False
+    assert fallback.acquire_calls == 0
+    await f.acquire("fo-4b", new_owner_token())
+    assert primary.acquire_calls == 2  # 未降级：下次仍直走 primary
