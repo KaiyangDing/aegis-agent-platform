@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
@@ -51,21 +52,28 @@ def _cassette() -> Cassette:
 
 
 async def _replay_all(factory, make_session) -> tuple[dict[int, str], list[AgentEvent]]:
-    """以 cassette 头部 session_id 重跑全部 40 轮（D10），返回（轮号→assistant 终稿, 全事件）。
+    """把 cassette 重绑定到随机新会话后重跑全部 40 轮，返回（轮号→assistant 终稿, 全事件）。
 
-    sessions 行建在测试事务内（外层回滚吞掉，conftest 既有机制）；FakeGateway 每次
-    新实例——游标是消费进度，跨用例共享实例即错配之源；收尾断言四道全部耗尽：
-    录了没放完 = 行为轨迹变短，也是漂移（D14）。
+    为什么不用 cassette 头部的原 session_id（plans/m2.11 偏差 #14，M2.10 残留教训变体）：
+    真实录制往本机 dev 库**提交过**该会话的 sessions/events 行——测试事务只回滚自己的
+    写入，挡不住已提交的残留，复用原 id 会撞 sessions_pkey 且 seq 接续旧流（CI 库干净
+    反而全绿=环境依赖测试）。D10 的真正目的仅是"请求与带子的匹配键一致"——重绑定
+    session_id（frozen dataclass 重新构造）完整保全它，回放从此不依赖机器状态。
+    sessions 行建在测试事务内（外层回滚吞掉）；FakeGateway 每次新实例——游标是消费
+    进度，跨用例共享实例即错配之源；收尾断言四道全部耗尽：录了没放完 = 行为轨迹
+    变短，也是漂移（D14）。
     """
     script = _script()
-    cassette = _cassette()
-    await make_session(cassette.session_id, tenant_id="bench", user_id="bench-user")
+    recorded = _cassette()
+    session_id = f"replay-long-dialog-{uuid.uuid4().hex[:8]}"
+    cassette = Cassette(session_id=session_id, scopes=recorded.scopes)
+    await make_session(session_id, tenant_id="bench", user_id="bench-user")
     gateway = FakeGateway(cassette)
     runtime = AgentRuntime(gateway, factory)
     transcript: dict[int, str] = {}
     events: list[AgentEvent] = []
     for i, user_input in enumerate(script.TURNS, 1):
-        async for ev in runtime.run(script.SPEC, cassette.session_id, user_input):
+        async for ev in runtime.run(script.SPEC, session_id, user_input):
             events.append(ev)
             if ev.type is EventType.ASSISTANT_MESSAGE:
                 transcript[i] = ev.payload["content"]  # 终态覆盖：同轮多条取最后（与脚本同口径）
