@@ -131,6 +131,22 @@ async def test_retry_exhaustion_raises_unavailable(db_session_factory) -> None:
     assert flaky.calls == 4  # 1 次初始 + 3 次重试
 
 
+async def test_os_level_connection_error_retries_like_transient(db_session_factory) -> None:
+    """M2.12 停 PG 实录抓出的形状盲区：连接建立期的 OS 级错误未经 SQLAlchemy 包装裸穿。
+
+    asyncpg 建连失败抛的 ConnectionRefusedError 是 OSError 不是 dbapi.Error——SQLAlchemy
+    只包装后者，池建连路径的前者会绕过 (OperationalError, InterfaceError) 白名单直接掀翻
+    run，违反"退避后明确终止"承诺（00 §6.2 第 6 项）。本测试钉死：OS 级连接错误与包装后的
+    连接级故障同待遇——退避重试，恢复即成功（耗尽翻译共享同一分支，已由上一测试覆盖）。
+    """
+    slept: list[float] = []
+    flaky = _FlakyFactory(db_session_factory, fail_times=2, exc=ConnectionRefusedError)
+    w = EventWriter(flaky, "s-os1", "r-1", next_seq=1, sleep=_sleep_recorder(slept), id_factory=_ids())
+    e = await w.append(EventType.LLM_CALL, {})
+    assert e.seq == 1
+    assert slept == [0.1, 0.2]
+
+
 async def test_bug_class_errors_propagate_without_retry(db_session_factory) -> None:
     """白名单哲学：ProgrammingError 是 bug 信号——SQL 写错了重试三次不会试对。"""
     slept: list[float] = []

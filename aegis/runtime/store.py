@@ -366,8 +366,11 @@ class EventWriter:
                 raise EventWriteFenced(
                     f"session={self._session_id} seq={seq} 已被其他写者占用——所有权旁落，本 loop 应自毁"
                 ) from e
-            except (OperationalError, InterfaceError) as e:
-                # 可重试白名单：连接级故障才配重试；ProgrammingError 等 bug 信号裸抛
+            except (OperationalError, InterfaceError, OSError) as e:
+                # 可重试白名单：连接级故障才配重试；ProgrammingError 等 bug 信号裸抛。
+                # OSError 族（ConnectionRefused/Reset/Timeout）在池建连期未经 SQLAlchemy 包装
+                # 裸穿（asyncpg 建连错误非 dbapi.Error——M2.12 停 PG 实录抓出，plans/m2.12
+                # 偏差 #9）；CancelledError/KeyboardInterrupt 属 BaseException 不受本行波及
                 if attempt >= len(_RETRY_BACKOFF_S):
                     raise EventStoreUnavailable(
                         f"事件写入重试 {len(_RETRY_BACKOFF_S)} 次仍失败——事实源不可用，终止本次 run"
