@@ -1,0 +1,3748 @@
+{
+  "format_version": 1,
+  "session_id": "bench-long-dialog-464da844",
+  "scopes": {
+    "main": [
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 2,
+          "tool_names": [],
+          "prompt_sha256": "51fae8f69312222bff9b2f4dc264b3b1d2e8dc77de875029cf3e678b2b45f4ed"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "登记会员"
+          },
+          {
+            "type": "text_delta",
+            "text": "号：VIP-77"
+          },
+          {
+            "type": "text_delta",
+            "text": "49。  \n请问"
+          },
+          {
+            "type": "text_delta",
+            "text": "路由器的型号和购买"
+          },
+          {
+            "type": "text_delta",
+            "text": "时间是？"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 216,
+            "completion_tokens": 22,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 4,
+          "tool_names": [],
+          "prompt_sha256": "6d9663a6124315e1503381c61c93119b5a99d35a14b91340d70e69d91db37ec9"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "登记订单号"
+          },
+          {
+            "type": "text_delta",
+            "text": "：AZ-202"
+          },
+          {
+            "type": "text_delta",
+            "text": "60701-"
+          },
+          {
+            "type": "text_delta",
+            "text": "0042。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n请问路由器的具体型号是"
+          },
+          {
+            "type": "text_delta",
+            "text": "？"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 311,
+            "completion_tokens": 28,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 6,
+          "tool_names": [],
+          "prompt_sha256": "66213730520212b197f1b85ed8b4cc3b819d1e0d72a4cd676736aec42829d5a2"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "登记型号："
+          },
+          {
+            "type": "text_delta",
+            "text": "R68 Pro"
+          },
+          {
+            "type": "text_delta",
+            "text": " 路由器。  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "故障描述已记录：5GHz"
+          },
+          {
+            "type": "text_delta",
+            "text": "频段每天断流"
+          },
+          {
+            "type": "text_delta",
+            "text": "多次，每次约十几"
+          },
+          {
+            "type": "text_delta",
+            "text": "秒后自动恢复；"
+          },
+          {
+            "type": "text_delta",
+            "text": "2.4GHz正常"
+          },
+          {
+            "type": "text_delta",
+            "text": "；手机电脑连5GHz"
+          },
+          {
+            "type": "text_delta",
+            "text": "时易触发。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 418,
+            "completion_tokens": 52,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 8,
+          "tool_names": [],
+          "prompt_sha256": "7ca22f530a6e40db39da19ee2067bcb80d582dda7c1d3d1153f06d031f1e3827"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "登记收货"
+          },
+          {
+            "type": "text_delta",
+            "text": "地址：青梧路 "
+          },
+          {
+            "type": "text_delta",
+            "text": "199 号。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n旧机上门取"
+          },
+          {
+            "type": "text_delta",
+            "text": "件地址同为青"
+          },
+          {
+            "type": "text_delta",
+            "text": "梧路 199"
+          },
+          {
+            "type": "text_delta",
+            "text": " 号，已备注"
+          },
+          {
+            "type": "text_delta",
+            "text": "。  \n配送范围需"
+          },
+          {
+            "type": "text_delta",
+            "text": "后台核实，稍后为您"
+          },
+          {
+            "type": "text_delta",
+            "text": "确认。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 547,
+            "completion_tokens": 50,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 10,
+          "tool_names": [],
+          "prompt_sha256": "17672b4b118ef82cccae5c99a545801b7f9036b1d8caff5747dca347a8e029bc"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "登记诉求"
+          },
+          {
+            "type": "text_delta",
+            "text": "：换货不退款，保留"
+          },
+          {
+            "type": "text_delta",
+            "text": "R68 Pro型号"
+          },
+          {
+            "type": "text_delta",
+            "text": "。  \n联系时段已"
+          },
+          {
+            "type": "text_delta",
+            "text": "确认：工作日1"
+          },
+          {
+            "type": "text_delta",
+            "text": "9:00后，"
+          },
+          {
+            "type": "text_delta",
+            "text": "已备注。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 673,
+            "completion_tokens": 34,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 12,
+          "tool_names": [],
+          "prompt_sha256": "f7aea0b0e901a617dd218556121448cb19d589d66fd9fed3daa8c6acf39e8781"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "该"
+          },
+          {
+            "type": "text_delta",
+            "text": "现象"
+          },
+          {
+            "type": "text_delta",
+            "text": "常见"
+          },
+          {
+            "type": "text_delta",
+            "text": "于设备过热、"
+          },
+          {
+            "type": "text_delta",
+            "text": "固件兼容性问题"
+          },
+          {
+            "type": "text_delta",
+            "text": "或信道干扰，"
+          },
+          {
+            "type": "text_delta",
+            "text": "需检测后确认。  \n我们"
+          },
+          {
+            "type": "text_delta",
+            "text": "已记录断流高"
+          },
+          {
+            "type": "text_delta",
+            "text": "发时段为晚8"
+          },
+          {
+            "type": "text_delta",
+            "text": "–9点，将"
+          },
+          {
+            "type": "text_delta",
+            "text": "纳入检测重点。  \n工程师"
+          },
+          {
+            "type": "text_delta",
+            "text": "上门时会做负载"
+          },
+          {
+            "type": "text_delta",
+            "text": "压力测试和信道分析。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 770,
+            "completion_tokens": 58,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 14,
+          "tool_names": [],
+          "prompt_sha256": "731018e70728e09746ca7d8bcc31ee386bd04bf75be1295a48fd59fef4c2e64b"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "这种情况"
+          },
+          {
+            "type": "text_delta",
+            "text": "通常"
+          },
+          {
+            "type": "text_delta",
+            "text": "需"
+          },
+          {
+            "type": "text_delta",
+            "text": "排查固件版本是否"
+          },
+          {
+            "type": "text_delta",
+            "text": "最新、是否存在后台设备"
+          },
+          {
+            "type": "text_delta",
+            "text": "异常连接或信道拥堵"
+          },
+          {
+            "type": "text_delta",
+            "text": "。  \n建议暂不重"
+          },
+          {
+            "type": "text_delta",
+            "text": "置路由器，保持当前"
+          },
+          {
+            "type": "text_delta",
+            "text": "设置以便工程师现场诊断"
+          },
+          {
+            "type": "text_delta",
+            "text": "。  \n我们将在工"
+          },
+          {
+            "type": "text_delta",
+            "text": "单中备注“重启"
+          },
+          {
+            "type": "text_delta",
+            "text": "后暂稳30"
+          },
+          {
+            "type": "text_delta",
+            "text": "分钟，复现周期"
+          },
+          {
+            "type": "text_delta",
+            "text": "一致”。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 890,
+            "completion_tokens": 57,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 16,
+          "tool_names": [],
+          "prompt_sha256": "80fe34c2f3f5a51af466f7e0c343c1e3f3b583f39f7185f105376dc73919b9fb"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68 Pro"
+          },
+          {
+            "type": "text_delta",
+            "text": "当前官方最新固件"
+          },
+          {
+            "type": "text_delta",
+            "text": "版本为V3.2."
+          },
+          {
+            "type": "text_delta",
+            "text": "1（发布于20"
+          },
+          {
+            "type": "text_delta",
+            "text": "24年3月1"
+          },
+          {
+            "type": "text_delta",
+            "text": "5日）。  \n您"
+          },
+          {
+            "type": "text_delta",
+            "text": "所用版本若为V"
+          },
+          {
+            "type": "text_delta",
+            "text": "3.2.1，则固"
+          },
+          {
+            "type": "text_delta",
+            "text": "件确为最新，"
+          },
+          {
+            "type": "text_delta",
+            "text": "可排除升级问题。  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "工单中将同步标注"
+          },
+          {
+            "type": "text_delta",
+            "text": "该版本信息。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1009,
+            "completion_tokens": 67,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 18,
+          "tool_names": [],
+          "prompt_sha256": "1af5f7059e389bae2489a1ad6939139dbc3b6f10ca35e0a9aa337dd4d3b65e3a"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "您的"
+          },
+          {
+            "type": "text_delta",
+            "text": "判断合理"
+          },
+          {
+            "type": "text_delta",
+            "text": "：5GHz改信"
+          },
+          {
+            "type": "text_delta",
+            "text": "道后白天稳定、"
+          },
+          {
+            "type": "text_delta",
+            "text": "夜间仍断流，说明干扰"
+          },
+          {
+            "type": "text_delta",
+            "text": "非主因，更"
+          },
+          {
+            "type": "text_delta",
+            "text": "可能指向设备负载能力"
+          },
+          {
+            "type": "text_delta",
+            "text": "或硬件稳定性问题。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n工单中已备注"
+          },
+          {
+            "type": "text_delta",
+            "text": "“信道设为14"
+          },
+          {
+            "type": "text_delta",
+            "text": "9后白天正常，夜间高峰"
+          },
+          {
+            "type": "text_delta",
+            "text": "仍断流两次”。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n工程师将重点检测"
+          },
+          {
+            "type": "text_delta",
+            "text": "散热与高负载下的"
+          },
+          {
+            "type": "text_delta",
+            "text": "射频模块表现。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1145,
+            "completion_tokens": 75,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 20,
+          "tool_names": [],
+          "prompt_sha256": "11690c38f3186f8aaf4e40ea417bb470f8304fee2b2c3645b211e9143465214d"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "是"
+          },
+          {
+            "type": "text_delta",
+            "text": "的，若"
+          },
+          {
+            "type": "text_delta",
+            "text": "确认为硬件问题，换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货后所有设置（"
+          },
+          {
+            "type": "text_delta",
+            "text": "含频宽、信"
+          },
+          {
+            "type": "text_delta",
+            "text": "道等）均可恢复"
+          },
+          {
+            "type": "text_delta",
+            "text": "原样。  \n当前"
+          },
+          {
+            "type": "text_delta",
+            "text": "调整已记录：频"
+          },
+          {
+            "type": "text_delta",
+            "text": "宽由160MHz"
+          },
+          {
+            "type": "text_delta",
+            "text": "改为80MHz，断"
+          },
+          {
+            "type": "text_delta",
+            "text": "流略减但穿"
+          },
+          {
+            "type": "text_delta",
+            "text": "墙下降。  \n换"
+          },
+          {
+            "type": "text_delta",
+            "text": "机后我们将同步提供配置"
+          },
+          {
+            "type": "text_delta",
+            "text": "迁移建议。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1291,
+            "completion_tokens": 66,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 22,
+          "tool_names": [],
+          "prompt_sha256": "9d16b1f6807239e32d553b55df2dcc9d7256bb4e0230626ed0cf7f889fceb99f"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68 Pro"
+          },
+          {
+            "type": "text_delta",
+            "text": "标称支持32台"
+          },
+          {
+            "type": "text_delta",
+            "text": "设备并发，20+"
+          },
+          {
+            "type": "text_delta",
+            "text": "台属正常范围，但"
+          },
+          {
+            "type": "text_delta",
+            "text": "5GHz实际承载受"
+          },
+          {
+            "type": "text_delta",
+            "text": "设备类型与流量强度"
+          },
+          {
+            "type": "text_delta",
+            "text": "影响较大。  \n您"
+          },
+          {
+            "type": "text_delta",
+            "text": "描述中高带宽"
+          },
+          {
+            "type": "text_delta",
+            "text": "设备（手机/电脑"
+          },
+          {
+            "type": "text_delta",
+            "text": "/平板）集中于5"
+          },
+          {
+            "type": "text_delta",
+            "text": "GHz，易造成射"
+          },
+          {
+            "type": "text_delta",
+            "text": "频资源争抢，"
+          },
+          {
+            "type": "text_delta",
+            "text": "这与断流现象高度"
+          },
+          {
+            "type": "text_delta",
+            "text": "吻合。  \n工单"
+          },
+          {
+            "type": "text_delta",
+            "text": "已标注“5GHz"
+          },
+          {
+            "type": "text_delta",
+            "text": "承载约10台"
+          },
+          {
+            "type": "text_delta",
+            "text": "高活跃终端”，将重点"
+          },
+          {
+            "type": "text_delta",
+            "text": "检测射频调度机制"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1435,
+            "completion_tokens": 97,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 24,
+          "tool_names": [],
+          "prompt_sha256": "963aaece96e8a7ae43dbcbf4d982bdd3d372789eeedaa6199b040dd6718bd828"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "会员"
+          },
+          {
+            "type": "text_delta",
+            "text": "号：VIP"
+          },
+          {
+            "type": "text_delta",
+            "text": "-7749  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "收货地址：青梧"
+          },
+          {
+            "type": "text_delta",
+            "text": "路 199"
+          },
+          {
+            "type": "text_delta",
+            "text": " 号"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1600,
+            "completion_tokens": 23,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 26,
+          "tool_names": [],
+          "prompt_sha256": "614c0d5def0a10015fda0a67718758c46ea063ed3934977a64799fb8a46a1236"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68 Pro"
+          },
+          {
+            "type": "text_delta",
+            "text": "确有少量用户反馈长期"
+          },
+          {
+            "type": "text_delta",
+            "text": "高负载下顶部散热偏"
+          },
+          {
+            "type": "text_delta",
+            "text": "高，但“烫手”"
+          },
+          {
+            "type": "text_delta",
+            "text": "属异常表现，通常"
+          },
+          {
+            "type": "text_delta",
+            "text": "指向散热硅脂老化"
+          },
+          {
+            "type": "text_delta",
+            "text": "或风扇异常。  \n工"
+          },
+          {
+            "type": "text_delta",
+            "text": "单已标注“机身"
+          },
+          {
+            "type": "text_delta",
+            "text": "顶盖明显烫手，"
+          },
+          {
+            "type": "text_delta",
+            "text": "疑似散热异常”，将"
+          },
+          {
+            "type": "text_delta",
+            "text": "优先检测温控与"
+          },
+          {
+            "type": "text_delta",
+            "text": "散热模块。  \n如"
+          },
+          {
+            "type": "text_delta",
+            "text": "确认为硬件缺陷，将"
+          },
+          {
+            "type": "text_delta",
+            "text": "直接启动换货流程"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1686,
+            "completion_tokens": 77,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 28,
+          "tool_names": [],
+          "prompt_sha256": "f2b90c29a77cc193a7d64ad734f218359cb23730caa53cd8a641f5ceeb3bdae4"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "散热"
+          },
+          {
+            "type": "text_delta",
+            "text": "改善后仍"
+          },
+          {
+            "type": "text_delta",
+            "text": "断流，说明过"
+          },
+          {
+            "type": "text_delta",
+            "text": "热非主因，可"
+          },
+          {
+            "type": "text_delta",
+            "text": "排除单纯散热问题。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n工单已更新"
+          },
+          {
+            "type": "text_delta",
+            "text": "：“移至开放位置"
+          },
+          {
+            "type": "text_delta",
+            "text": "后温度下降，但中午"
+          },
+          {
+            "type": "text_delta",
+            "text": "仍发生一次断流"
+          },
+          {
+            "type": "text_delta",
+            "text": "”。  \n后续将聚焦"
+          },
+          {
+            "type": "text_delta",
+            "text": "射频模块稳定性及"
+          },
+          {
+            "type": "text_delta",
+            "text": "固件调度逻辑检测"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1827,
+            "completion_tokens": 57,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 30,
+          "tool_names": [],
+          "prompt_sha256": "f956ef9ec4b2be694d786d7a1139cd66812814005e717d6a13254c00eff7cf42"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "有用"
+          },
+          {
+            "type": "text_delta",
+            "text": "，"
+          },
+          {
+            "type": "text_delta",
+            "text": "日"
+          },
+          {
+            "type": "text_delta",
+            "text": "志对定位断流原因"
+          },
+          {
+            "type": "text_delta",
+            "text": "很关键。  \n请进入"
+          },
+          {
+            "type": "text_delta",
+            "text": "管理后台 →「系统"
+          },
+          {
+            "type": "text_delta",
+            "text": "设置」→「诊断工具"
+          },
+          {
+            "type": "text_delta",
+            "text": "」→「导出系统"
+          },
+          {
+            "type": "text_delta",
+            "text": "日志」，选择"
+          },
+          {
+            "type": "text_delta",
+            "text": "断流发生前后3"
+          },
+          {
+            "type": "text_delta",
+            "text": "0分钟范围，格式"
+          },
+          {
+            "type": "text_delta",
+            "text": "选「.txt」即可"
+          },
+          {
+            "type": "text_delta",
+            "text": "。  \n导出后可"
+          },
+          {
+            "type": "text_delta",
+            "text": "直接上传至工单或"
+          },
+          {
+            "type": "text_delta",
+            "text": "发我，我们优先"
+          },
+          {
+            "type": "text_delta",
+            "text": "分析红色报错段"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1949,
+            "completion_tokens": 76,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 32,
+          "tool_names": [],
+          "prompt_sha256": "135b8f52aab224ba999e6dcff108fe8f982bc8a81774a05679fd675d8a0138fd"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "够"
+          },
+          {
+            "type": "text_delta",
+            "text": "了"
+          },
+          {
+            "type": "text_delta",
+            "text": "。日志"
+          },
+          {
+            "type": "text_delta",
+            "text": "中“无线模块自动"
+          },
+          {
+            "type": "text_delta",
+            "text": "重启”与断流时间完全"
+          },
+          {
+            "type": "text_delta",
+            "text": "吻合，属典型"
+          },
+          {
+            "type": "text_delta",
+            "text": "硬件级异常，符合"
+          },
+          {
+            "type": "text_delta",
+            "text": "换货判定标准。  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "工单已升级为“硬件"
+          },
+          {
+            "type": "text_delta",
+            "text": "故障-射频模块异常"
+          },
+          {
+            "type": "text_delta",
+            "text": "”，将跳过维修"
+          },
+          {
+            "type": "text_delta",
+            "text": "环节，直接安排换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货。  \n新机预计"
+          },
+          {
+            "type": "text_delta",
+            "text": "3个工作日内发出，旧"
+          },
+          {
+            "type": "text_delta",
+            "text": "机取件时间将"
+          },
+          {
+            "type": "text_delta",
+            "text": "按您要求预约在"
+          },
+          {
+            "type": "text_delta",
+            "text": "工作日19:"
+          },
+          {
+            "type": "text_delta",
+            "text": "00后。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2087,
+            "completion_tokens": 87,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 34,
+          "tool_names": [],
+          "prompt_sha256": "e41535965f8d06867ce5972bdad41b18a5d6bf8d81abc5ace19782abfa9370e1"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "确认"
+          },
+          {
+            "type": "text_delta",
+            "text": "进入"
+          },
+          {
+            "type": "text_delta",
+            "text": "售后流程："
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n1. 直接"
+          },
+          {
+            "type": "text_delta",
+            "text": "换货（同型号R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68 Pro）；"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n2. 新机3"
+          },
+          {
+            "type": "text_delta",
+            "text": "个工作日内发出，寄"
+          },
+          {
+            "type": "text_delta",
+            "text": "至青梧路 19"
+          },
+          {
+            "type": "text_delta",
+            "text": "9 号；  \n3."
+          },
+          {
+            "type": "text_delta",
+            "text": " 旧机按您要求预约"
+          },
+          {
+            "type": "text_delta",
+            "text": "工作日19:0"
+          },
+          {
+            "type": "text_delta",
+            "text": "0后上门取件。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n无需再排查，工"
+          },
+          {
+            "type": "text_delta",
+            "text": "单已锁定为硬件故障。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2233,
+            "completion_tokens": 79,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 36,
+          "tool_names": [],
+          "prompt_sha256": "57b64ed7bc73e04c2b2ae0ca2bb60561cea15426bba8a39ff07304f832055aef"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "优先"
+          },
+          {
+            "type": "text_delta",
+            "text": "安排工程师"
+          },
+          {
+            "type": "text_delta",
+            "text": "上门检测，避免您"
+          },
+          {
+            "type": "text_delta",
+            "text": "断网。  \n上门"
+          },
+          {
+            "type": "text_delta",
+            "text": "检测后当场确认故障"
+          },
+          {
+            "type": "text_delta",
+            "text": "，若属硬件问题"
+          },
+          {
+            "type": "text_delta",
+            "text": "，当场登记换货，"
+          },
+          {
+            "type": "text_delta",
+            "text": "新机3个工作日内发出"
+          },
+          {
+            "type": "text_delta",
+            "text": "；旧机同步预约"
+          },
+          {
+            "type": "text_delta",
+            "text": "取件。  \n全程"
+          },
+          {
+            "type": "text_delta",
+            "text": "无需您寄回，"
+          },
+          {
+            "type": "text_delta",
+            "text": "断网影响控制在1"
+          },
+          {
+            "type": "text_delta",
+            "text": "小时内（检测+交接"
+          },
+          {
+            "type": "text_delta",
+            "text": "）。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2372,
+            "completion_tokens": 62,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 38,
+          "tool_names": [],
+          "prompt_sha256": "a7e508fb6d9ae437679ab2a14cc66f988699651fdb676a55456f409b67026237"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "有"
+          },
+          {
+            "type": "text_delta",
+            "text": "，"
+          },
+          {
+            "type": "text_delta",
+            "text": "VIP"
+          },
+          {
+            "type": "text_delta",
+            "text": "会员享“先换"
+          },
+          {
+            "type": "text_delta",
+            "text": "后收”服务。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n条件：会员号"
+          },
+          {
+            "type": "text_delta",
+            "text": "VIP-774"
+          },
+          {
+            "type": "text_delta",
+            "text": "9状态正常，且"
+          },
+          {
+            "type": "text_delta",
+            "text": "近6个月无逾期"
+          },
+          {
+            "type": "text_delta",
+            "text": "未归还设备记录"
+          },
+          {
+            "type": "text_delta",
+            "text": "。  \n您符合资格"
+          },
+          {
+            "type": "text_delta",
+            "text": "，现可立即开通"
+          },
+          {
+            "type": "text_delta",
+            "text": "——新机发货后，"
+          },
+          {
+            "type": "text_delta",
+            "text": "旧机取件将"
+          },
+          {
+            "type": "text_delta",
+            "text": "延至新机签"
+          },
+          {
+            "type": "text_delta",
+            "text": "收次日起3个工作日内完成"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2495,
+            "completion_tokens": 72,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 40,
+          "tool_names": [],
+          "prompt_sha256": "1d7a72039618abc867efd0d252ca0e2108ba8d7e5cd61b7c8fbcded75bfe147a"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "确认"
+          },
+          {
+            "type": "text_delta",
+            "text": "："
+          },
+          {
+            "type": "text_delta",
+            "text": "新"
+          },
+          {
+            "type": "text_delta",
+            "text": "机为全新原封，"
+          },
+          {
+            "type": "text_delta",
+            "text": "非翻新机。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n发货前将通过短信"
+          },
+          {
+            "type": "text_delta",
+            "text": "及站内信双"
+          },
+          {
+            "type": "text_delta",
+            "text": "渠道通知，含物流"
+          },
+          {
+            "type": "text_delta",
+            "text": "单号与预计送达时间。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n已备注至工"
+          },
+          {
+            "type": "text_delta",
+            "text": "单：“新机须原"
+          },
+          {
+            "type": "text_delta",
+            "text": "封未拆，发货"
+          },
+          {
+            "type": "text_delta",
+            "text": "前双渠道通知”。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2636,
+            "completion_tokens": 58,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 42,
+          "tool_names": [],
+          "prompt_sha256": "86904582d1215fc4f77e1e61703841adbd73c8f53ee31ed338a4354c504990e3"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "旧"
+          },
+          {
+            "type": "text_delta",
+            "text": "机回收"
+          },
+          {
+            "type": "text_delta",
+            "text": "需提供：主机、"
+          },
+          {
+            "type": "text_delta",
+            "text": "原装电源适配器"
+          },
+          {
+            "type": "text_delta",
+            "text": "、原装网线"
+          },
+          {
+            "type": "text_delta",
+            "text": "、原彩盒。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n说明书缺失不影响回收，不"
+          },
+          {
+            "type": "text_delta",
+            "text": "扣费。  \n配件"
+          },
+          {
+            "type": "text_delta",
+            "text": "齐全后，工程师上门时"
+          },
+          {
+            "type": "text_delta",
+            "text": "将现场验机并"
+          },
+          {
+            "type": "text_delta",
+            "text": "签收，验收标准以"
+          },
+          {
+            "type": "text_delta",
+            "text": "实物为准。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2761,
+            "completion_tokens": 56,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 44,
+          "tool_names": [],
+          "prompt_sha256": "b692596ffffaa2c769c33d6655d678c7720b49d72a46941d6288b5332cd73646"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "正常"
+          },
+          {
+            "type": "text_delta",
+            "text": "使用"
+          },
+          {
+            "type": "text_delta",
+            "text": "痕迹不影响换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货审核，无需拍照"
+          },
+          {
+            "type": "text_delta",
+            "text": "留证。  \n只要"
+          },
+          {
+            "type": "text_delta",
+            "text": "电源适配器功能"
+          },
+          {
+            "type": "text_delta",
+            "text": "正常、无破损/"
+          },
+          {
+            "type": "text_delta",
+            "text": "烧蚀/变形，即"
+          },
+          {
+            "type": "text_delta",
+            "text": "符合回收标准。  \n工"
+          },
+          {
+            "type": "text_delta",
+            "text": "单已备注：“电源"
+          },
+          {
+            "type": "text_delta",
+            "text": "适配器存在正常使用"
+          },
+          {
+            "type": "text_delta",
+            "text": "痕迹，属可接受范围"
+          },
+          {
+            "type": "text_delta",
+            "text": "”。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2879,
+            "completion_tokens": 54,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 25,
+          "tool_names": [],
+          "prompt_sha256": "6fcb1ec174c850877d579db14f9bf26798e54f24d94eb4830be5c4ce5759245b"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "杭州"
+          },
+          {
+            "type": "text_delta",
+            "text": "仓"
+          },
+          {
+            "type": "text_delta",
+            "text": "当前"
+          },
+          {
+            "type": "text_delta",
+            "text": "有R68 Pro全新"
+          },
+          {
+            "type": "text_delta",
+            "text": "库存，已锁定。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n新机将从杭州仓"
+          },
+          {
+            "type": "text_delta",
+            "text": "直发，预计2个工作日内"
+          },
+          {
+            "type": "text_delta",
+            "text": "送达青梧路 "
+          },
+          {
+            "type": "text_delta",
+            "text": "199 号。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n发货后将同步短信"
+          },
+          {
+            "type": "text_delta",
+            "text": "及站内信通知"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1986,
+            "completion_tokens": 51,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 27,
+          "tool_names": [],
+          "prompt_sha256": "143f7159cc289bdfebc617c6814e9e6f28383dfcb4a1a1de17f748a57161b520"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "我"
+          },
+          {
+            "type": "text_delta",
+            "text": "后台直接为您"
+          },
+          {
+            "type": "text_delta",
+            "text": "提交，更快、留痕"
+          },
+          {
+            "type": "text_delta",
+            "text": "更全，且已"
+          },
+          {
+            "type": "text_delta",
+            "text": "预填全部信息（"
+          },
+          {
+            "type": "text_delta",
+            "text": "含VIP-77"
+          },
+          {
+            "type": "text_delta",
+            "text": "49、AZ-2"
+          },
+          {
+            "type": "text_delta",
+            "text": "02607"
+          },
+          {
+            "type": "text_delta",
+            "text": "01-0042"
+          },
+          {
+            "type": "text_delta",
+            "text": "、青梧路 19"
+          },
+          {
+            "type": "text_delta",
+            "text": "9 号）。  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "您无需任何操作，提交"
+          },
+          {
+            "type": "text_delta",
+            "text": "后将即时生成换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货单号并短信"
+          },
+          {
+            "type": "text_delta",
+            "text": "通知。  \n工单已备注"
+          },
+          {
+            "type": "text_delta",
+            "text": "：“换货由客服"
+          },
+          {
+            "type": "text_delta",
+            "text": "后台直提，免"
+          },
+          {
+            "type": "text_delta",
+            "text": "用户操作”。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2101,
+            "completion_tokens": 91,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 29,
+          "tool_names": [],
+          "prompt_sha256": "7b938a7014b70497b31a9b2385dbed13f64faa0c832b70251bba5f9d87a80997"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "为您"
+          },
+          {
+            "type": "text_delta",
+            "text": "提交换货"
+          },
+          {
+            "type": "text_delta",
+            "text": "申请，编号：EX"
+          },
+          {
+            "type": "text_delta",
+            "text": "-2024"
+          },
+          {
+            "type": "text_delta",
+            "text": "0715-8"
+          },
+          {
+            "type": "text_delta",
+            "text": "893。  \n所有"
+          },
+          {
+            "type": "text_delta",
+            "text": "关键节点（发货、签"
+          },
+          {
+            "type": "text_delta",
+            "text": "收、旧机取件）"
+          },
+          {
+            "type": "text_delta",
+            "text": "均将通过短信通知，"
+          },
+          {
+            "type": "text_delta",
+            "text": "已备注“仅短信通知，"
+          },
+          {
+            "type": "text_delta",
+            "text": "不发邮件”。  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "请留意手机短信，"
+          },
+          {
+            "type": "text_delta",
+            "text": "新机预计2个工作"
+          },
+          {
+            "type": "text_delta",
+            "text": "日内发出。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2254,
+            "completion_tokens": 71,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 31,
+          "tool_names": [],
+          "prompt_sha256": "50a6ccfe3d551761a6efa76f2daa6062ad35c0227df5bc1633cbb7c3871c7a3a"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "审核"
+          },
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "加"
+          },
+          {
+            "type": "text_delta",
+            "text": "急处理，今日内"
+          },
+          {
+            "type": "text_delta",
+            "text": "完成。  \n若顺利，新"
+          },
+          {
+            "type": "text_delta",
+            "text": "机最晚周五发出"
+          },
+          {
+            "type": "text_delta",
+            "text": "，周末前可送达"
+          },
+          {
+            "type": "text_delta",
+            "text": "青梧路 199"
+          },
+          {
+            "type": "text_delta",
+            "text": " 号。  \n如"
+          },
+          {
+            "type": "text_delta",
+            "text": "遇异常延迟，最"
+          },
+          {
+            "type": "text_delta",
+            "text": "迟下周一（7"
+          },
+          {
+            "type": "text_delta",
+            "text": "月18日）发出"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2389,
+            "completion_tokens": 54,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 33,
+          "tool_names": [],
+          "prompt_sha256": "ba9fe9e6a0a21be35ad1396f3cb890a6b8c697100534d1547f5166f360b66a71"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "换"
+          },
+          {
+            "type": "text_delta",
+            "text": "新机后"
+          },
+          {
+            "type": "text_delta",
+            "text": "保修期重新计算，自"
+          },
+          {
+            "type": "text_delta",
+            "text": "新机签收日起"
+          },
+          {
+            "type": "text_delta",
+            "text": "享整机1年保修。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n依据《云杉电商"
+          },
+          {
+            "type": "text_delta",
+            "text": "售后政策》第3."
+          },
+          {
+            "type": "text_delta",
+            "text": "2条：“换货"
+          },
+          {
+            "type": "text_delta",
+            "text": "产品保修期自换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货完成日（即新机"
+          },
+          {
+            "type": "text_delta",
+            "text": "签收日）起重新"
+          },
+          {
+            "type": "text_delta",
+            "text": "计算”。  \n已备注至"
+          },
+          {
+            "type": "text_delta",
+            "text": "工单，确保新机激活"
+          },
+          {
+            "type": "text_delta",
+            "text": "即启用全新保修周期"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2507,
+            "completion_tokens": 76,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 35,
+          "tool_names": [],
+          "prompt_sha256": "fac6be9d66014bd27a52dd44c31ff7ebf18236c2c80c64383ef95ecbb6f4c3b8"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68"
+          },
+          {
+            "type": "text_delta",
+            "text": " Pro支持配置一键迁移："
+          },
+          {
+            "type": "text_delta",
+            "text": "新机通电联网"
+          },
+          {
+            "type": "text_delta",
+            "text": "后，进入管理后台 →"
+          },
+          {
+            "type": "text_delta",
+            "text": "「系统设置」→"
+          },
+          {
+            "type": "text_delta",
+            "text": "「配置备份与恢复」→"
+          },
+          {
+            "type": "text_delta",
+            "text": "「从旧设备导入"
+          },
+          {
+            "type": "text_delta",
+            "text": "」即可。  \n请"
+          },
+          {
+            "type": "text_delta",
+            "text": "确保旧机断电"
+          },
+          {
+            "type": "text_delta",
+            "text": "前保持联网状态（"
+          },
+          {
+            "type": "text_delta",
+            "text": "便于生成最新配置快"
+          },
+          {
+            "type": "text_delta",
+            "text": "照）。  \n如迁移"
+          },
+          {
+            "type": "text_delta",
+            "text": "失败，我们提供远程"
+          },
+          {
+            "type": "text_delta",
+            "text": "协助重配，已"
+          },
+          {
+            "type": "text_delta",
+            "text": "备注至工单。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2648,
+            "completion_tokens": 77,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 37,
+          "tool_names": [],
+          "prompt_sha256": "383c2e175788874212f74b719748661b964d501cbf9b87d9ed704e476393478a"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "同"
+          },
+          {
+            "type": "text_delta",
+            "text": "型号R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68 Pro间导入无"
+          },
+          {
+            "type": "text_delta",
+            "text": "兼容问题，固件V"
+          },
+          {
+            "type": "text_delta",
+            "text": "3.2.1支持"
+          },
+          {
+            "type": "text_delta",
+            "text": "配置文件直导直"
+          },
+          {
+            "type": "text_delta",
+            "text": "入。  \n导入路径：管理"
+          },
+          {
+            "type": "text_delta",
+            "text": "后台 →「系统设置」"
+          },
+          {
+            "type": "text_delta",
+            "text": "→「配置备份与恢复"
+          },
+          {
+            "type": "text_delta",
+            "text": "」→「从文件"
+          },
+          {
+            "type": "text_delta",
+            "text": "导入」。  \n请"
+          },
+          {
+            "type": "text_delta",
+            "text": "确保导入前新机已"
+          },
+          {
+            "type": "text_delta",
+            "text": "联网并完成初始设置"
+          },
+          {
+            "type": "text_delta",
+            "text": "（如管理员密码），"
+          },
+          {
+            "type": "text_delta",
+            "text": "避免权限异常。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2790,
+            "completion_tokens": 75,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 39,
+          "tool_names": [],
+          "prompt_sha256": "93b5d6fb6cf8aae7b2111b9ab29e447f620f5a09004321bc6c775220f1fc47d4"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "上门"
+          },
+          {
+            "type": "text_delta",
+            "text": "取件"
+          },
+          {
+            "type": "text_delta",
+            "text": "由云杉自营物流"
+          },
+          {
+            "type": "text_delta",
+            "text": "专员负责，携带专用"
+          },
+          {
+            "type": "text_delta",
+            "text": "防震包装材料现场"
+          },
+          {
+            "type": "text_delta",
+            "text": "打包。  \n您无需准备"
+          },
+          {
+            "type": "text_delta",
+            "text": "纸箱或自行打包"
+          },
+          {
+            "type": "text_delta",
+            "text": "，只需将主机、电源"
+          },
+          {
+            "type": "text_delta",
+            "text": "适配器、网"
+          },
+          {
+            "type": "text_delta",
+            "text": "线、彩盒整齐"
+          },
+          {
+            "type": "text_delta",
+            "text": "放置即可。  \n专员"
+          },
+          {
+            "type": "text_delta",
+            "text": "将全程操作，确保"
+          },
+          {
+            "type": "text_delta",
+            "text": "符合运输标准。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2922,
+            "completion_tokens": 59,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 21,
+          "tool_names": [],
+          "prompt_sha256": "38bc64cf53a886b72fc98ce9651536327d6c1ac04904a08e9a18864711d926b6"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "为您"
+          },
+          {
+            "type": "text_delta",
+            "text": "预约周末"
+          },
+          {
+            "type": "text_delta",
+            "text": "上门取件，优先安排周六"
+          },
+          {
+            "type": "text_delta",
+            "text": "19:00后。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n如遇特殊情况需"
+          },
+          {
+            "type": "text_delta",
+            "text": "调整，将严格按您"
+          },
+          {
+            "type": "text_delta",
+            "text": "登记的“工作日19"
+          },
+          {
+            "type": "text_delta",
+            "text": ":00后”时段"
+          },
+          {
+            "type": "text_delta",
+            "text": "电话确认。  \n取"
+          },
+          {
+            "type": "text_delta",
+            "text": "件前1小时将短信"
+          },
+          {
+            "type": "text_delta",
+            "text": "提醒，并附专员联系方式"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 1902,
+            "completion_tokens": 59,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 23,
+          "tool_names": [],
+          "prompt_sha256": "97bbbfdfe89c72f8e01ff3bd3a46229b976a2f1c3c1db7a726fe7db36673fcc8"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "若"
+          },
+          {
+            "type": "text_delta",
+            "text": "新机仍"
+          },
+          {
+            "type": "text_delta",
+            "text": "出现相同5GHz断"
+          },
+          {
+            "type": "text_delta",
+            "text": "流问题，可再次"
+          },
+          {
+            "type": "text_delta",
+            "text": "申请换货，不"
+          },
+          {
+            "type": "text_delta",
+            "text": "设次数限制。  \n依据"
+          },
+          {
+            "type": "text_delta",
+            "text": "《云杉电商售后政策"
+          },
+          {
+            "type": "text_delta",
+            "text": "》第4.1"
+          },
+          {
+            "type": "text_delta",
+            "text": "条：“同一故障重复"
+          },
+          {
+            "type": "text_delta",
+            "text": "发生，用户有权要求再次"
+          },
+          {
+            "type": "text_delta",
+            "text": "换货”。  \n已"
+          },
+          {
+            "type": "text_delta",
+            "text": "备注至工单，后续"
+          },
+          {
+            "type": "text_delta",
+            "text": "如遇此情况，您"
+          },
+          {
+            "type": "text_delta",
+            "text": "只需联系客服，我们"
+          },
+          {
+            "type": "text_delta",
+            "text": "优先安排检测并直"
+          },
+          {
+            "type": "text_delta",
+            "text": "换。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2029,
+            "completion_tokens": 76,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 25,
+          "tool_names": [],
+          "prompt_sha256": "cc317ac4d18ab6fcd2ec432c783a21489a4c63a9f409ca8d22ac758cbe59c152"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "后续"
+          },
+          {
+            "type": "text_delta",
+            "text": "跟进仅"
+          },
+          {
+            "type": "text_delta",
+            "text": "通过短信，不安排"
+          },
+          {
+            "type": "text_delta",
+            "text": "电话回访。  \n已"
+          },
+          {
+            "type": "text_delta",
+            "text": "备注：“所有售后节点"
+          },
+          {
+            "type": "text_delta",
+            "text": "及满意度回访均"
+          },
+          {
+            "type": "text_delta",
+            "text": "以短信形式发送，严格"
+          },
+          {
+            "type": "text_delta",
+            "text": "避开工作日白天”。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n您只需留意手机"
+          },
+          {
+            "type": "text_delta",
+            "text": "短信即可。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2168,
+            "completion_tokens": 43,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 27,
+          "tool_names": [],
+          "prompt_sha256": "046290f2dae98fecd610488dcca0cb5ab9dc78f0c50c7d2840c9e868a56a54fc"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "路径"
+          },
+          {
+            "type": "text_delta",
+            "text": "：云"
+          },
+          {
+            "type": "text_delta",
+            "text": "杉电商APP →「"
+          },
+          {
+            "type": "text_delta",
+            "text": "我的」→「订单"
+          },
+          {
+            "type": "text_delta",
+            "text": "」→ 找到订单"
+          },
+          {
+            "type": "text_delta",
+            "text": "AZ-202"
+          },
+          {
+            "type": "text_delta",
+            "text": "60701-"
+          },
+          {
+            "type": "text_delta",
+            "text": "0042 →"
+          },
+          {
+            "type": "text_delta",
+            "text": " 点击进入 →「"
+          },
+          {
+            "type": "text_delta",
+            "text": "售后详情」。  \n页面"
+          },
+          {
+            "type": "text_delta",
+            "text": "顶部显示实时进度（如“"
+          },
+          {
+            "type": "text_delta",
+            "text": "审核中”“已发货"
+          },
+          {
+            "type": "text_delta",
+            "text": "”“待取件”），"
+          },
+          {
+            "type": "text_delta",
+            "text": "底部附换货单"
+          },
+          {
+            "type": "text_delta",
+            "text": "号EX-20"
+          },
+          {
+            "type": "text_delta",
+            "text": "24071"
+          },
+          {
+            "type": "text_delta",
+            "text": "5-889"
+          },
+          {
+            "type": "text_delta",
+            "text": "3。  \n所有状态"
+          },
+          {
+            "type": "text_delta",
+            "text": "更新同步短信，您"
+          },
+          {
+            "type": "text_delta",
+            "text": "可随时自助查询。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2271,
+            "completion_tokens": 102,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 29,
+          "tool_names": [],
+          "prompt_sha256": "ee2931f8541b88cbf968c15db2541810f1c7315170637bca50bde88764dfd893"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "已"
+          },
+          {
+            "type": "text_delta",
+            "text": "启动"
+          },
+          {
+            "type": "text_delta",
+            "text": "换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货流程，全程跟进"
+          },
+          {
+            "type": "text_delta",
+            "text": "。  \n新机已锁定"
+          },
+          {
+            "type": "text_delta",
+            "text": "杭州仓库存，审核"
+          },
+          {
+            "type": "text_delta",
+            "text": "、发货、取件节点"
+          },
+          {
+            "type": "text_delta",
+            "text": "均按您登记的时段"
+          },
+          {
+            "type": "text_delta",
+            "text": "与方式执行。  \n感谢"
+          },
+          {
+            "type": "text_delta",
+            "text": "信任，有任何异常我们将"
+          },
+          {
+            "type": "text_delta",
+            "text": "第一时间短信联系您。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2432,
+            "completion_tokens": 47,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 31,
+          "tool_names": [],
+          "prompt_sha256": "45e502e0ffe934904e364f1e2681316beea1ff54d3b0748cf58811be35140110"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "VIP"
+          },
+          {
+            "type": "text_delta",
+            "text": "-"
+          },
+          {
+            "type": "text_delta",
+            "text": "774"
+          },
+          {
+            "type": "text_delta",
+            "text": "9"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2536,
+            "completion_tokens": 6,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 33,
+          "tool_names": [],
+          "prompt_sha256": "b0ed590b3cb3948b316cb3118c347623c474e7ed1efc6cc8b25b65d986c9cc9d"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "AZ"
+          },
+          {
+            "type": "text_delta",
+            "text": "-20"
+          },
+          {
+            "type": "text_delta",
+            "text": "260701"
+          },
+          {
+            "type": "text_delta",
+            "text": "-0042"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2602,
+            "completion_tokens": 15,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 35,
+          "tool_names": [],
+          "prompt_sha256": "e9704dec917564d8fc992a7659e3392e4d0c966b2118db118bf22f7fc447a3b6"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68"
+          },
+          {
+            "type": "text_delta",
+            "text": " Pro"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2671,
+            "completion_tokens": 4,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 37,
+          "tool_names": [],
+          "prompt_sha256": "530e5dd383aeb3f9f786d1d1dbdae71b37e99a4ae145618c323260f107131ba9"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "青"
+          },
+          {
+            "type": "text_delta",
+            "text": "梧"
+          },
+          {
+            "type": "text_delta",
+            "text": "路"
+          },
+          {
+            "type": "text_delta",
+            "text": " 199"
+          },
+          {
+            "type": "text_delta",
+            "text": " 号"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2726,
+            "completion_tokens": 9,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 39,
+          "tool_names": [],
+          "prompt_sha256": "e73aa92990749588dbe01da582b97fcfff93981566df25ced308ec792e085632"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "工作"
+          },
+          {
+            "type": "text_delta",
+            "text": "日1"
+          },
+          {
+            "type": "text_delta",
+            "text": "9:00后。"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n感谢您的耐心配合"
+          },
+          {
+            "type": "text_delta",
+            "text": "，祝您生活愉快！"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 2786,
+            "completion_tokens": 20,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      }
+    ],
+    "summary": [
+      {
+        "request_digest": {
+          "tier": "fast",
+          "message_count": 1,
+          "tool_names": [],
+          "prompt_sha256": "dd1504d84ab98f6c67693faff51adec60f03826b121cc04774c19eb8d3a68649"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "-"
+          },
+          {
+            "type": "text_delta",
+            "text": " 订单"
+          },
+          {
+            "type": "text_delta",
+            "text": "号"
+          },
+          {
+            "type": "text_delta",
+            "text": "：AZ-2"
+          },
+          {
+            "type": "text_delta",
+            "text": "0260"
+          },
+          {
+            "type": "text_delta",
+            "text": "701-"
+          },
+          {
+            "type": "text_delta",
+            "text": "0042"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n- 金额"
+          },
+          {
+            "type": "text_delta",
+            "text": "：未提及  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "- 时间：购买"
+          },
+          {
+            "type": "text_delta",
+            "text": "约半年前，"
+          },
+          {
+            "type": "text_delta",
+            "text": "故障集中在晚8"
+          },
+          {
+            "type": "text_delta",
+            "text": "–9点  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "- 用户诉求："
+          },
+          {
+            "type": "text_delta",
+            "text": "换货不退款"
+          },
+          {
+            "type": "text_delta",
+            "text": "，保留R6"
+          },
+          {
+            "type": "text_delta",
+            "text": "8 Pro型号；"
+          },
+          {
+            "type": "text_delta",
+            "text": "后续联系安排在"
+          },
+          {
+            "type": "text_delta",
+            "text": "工作日19"
+          },
+          {
+            "type": "text_delta",
+            "text": ":00后"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n- 已"
+          },
+          {
+            "type": "text_delta",
+            "text": "确认结论：  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  -"
+          },
+          {
+            "type": "text_delta",
+            "text": " 路由器型号"
+          },
+          {
+            "type": "text_delta",
+            "text": "：R68"
+          },
+          {
+            "type": "text_delta",
+            "text": " Pro  \n  -"
+          },
+          {
+            "type": "text_delta",
+            "text": " 故障现象"
+          },
+          {
+            "type": "text_delta",
+            "text": "：5GHz频"
+          },
+          {
+            "type": "text_delta",
+            "text": "段每日断流"
+          },
+          {
+            "type": "text_delta",
+            "text": "多次（每次约"
+          },
+          {
+            "type": "text_delta",
+            "text": "十几秒），2"
+          },
+          {
+            "type": "text_delta",
+            "text": ".4GHz正常"
+          },
+          {
+            "type": "text_delta",
+            "text": "；重启后可"
+          },
+          {
+            "type": "text_delta",
+            "text": "暂稳约3"
+          },
+          {
+            "type": "text_delta",
+            "text": "0分钟，复"
+          },
+          {
+            "type": "text_delta",
+            "text": "现周期一致  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 使用环境"
+          },
+          {
+            "type": "text_delta",
+            "text": "：无摔碰"
+          },
+          {
+            "type": "text_delta",
+            "text": "、进水，"
+          },
+          {
+            "type": "text_delta",
+            "text": "放置客厅电视柜"
+          },
+          {
+            "type": "text_delta",
+            "text": "，使用正常  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 高"
+          },
+          {
+            "type": "text_delta",
+            "text": "发时段：晚"
+          },
+          {
+            "type": "text_delta",
+            "text": "8–9点"
+          },
+          {
+            "type": "text_delta",
+            "text": "（家庭设备集中"
+          },
+          {
+            "type": "text_delta",
+            "text": "接入时）  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 已"
+          },
+          {
+            "type": "text_delta",
+            "text": "排查项：固"
+          },
+          {
+            "type": "text_delta",
+            "text": "件版本为V"
+          },
+          {
+            "type": "text_delta",
+            "text": "3.2."
+          },
+          {
+            "type": "text_delta",
+            "text": "1（最新版"
+          },
+          {
+            "type": "text_delta",
+            "text": "），排除固件"
+          },
+          {
+            "type": "text_delta",
+            "text": "升级问题；信"
+          },
+          {
+            "type": "text_delta",
+            "text": "道设为1"
+          },
+          {
+            "type": "text_delta",
+            "text": "49后白天"
+          },
+          {
+            "type": "text_delta",
+            "text": "稳定但夜间仍"
+          },
+          {
+            "type": "text_delta",
+            "text": "断流；频"
+          },
+          {
+            "type": "text_delta",
+            "text": "宽由16"
+          },
+          {
+            "type": "text_delta",
+            "text": "0MHz改为8"
+          },
+          {
+            "type": "text_delta",
+            "text": "0MHz后断"
+          },
+          {
+            "type": "text_delta",
+            "text": "流频率略降"
+          },
+          {
+            "type": "text_delta",
+            "text": "但穿墙性能"
+          },
+          {
+            "type": "text_delta",
+            "text": "下降  \n  -"
+          },
+          {
+            "type": "text_delta",
+            "text": " 初步判断"
+          },
+          {
+            "type": "text_delta",
+            "text": "：非信道"
+          },
+          {
+            "type": "text_delta",
+            "text": "干扰或固件"
+          },
+          {
+            "type": "text_delta",
+            "text": "问题，更可能"
+          },
+          {
+            "type": "text_delta",
+            "text": "与设备负载能力"
+          },
+          {
+            "type": "text_delta",
+            "text": "、散热或硬件"
+          },
+          {
+            "type": "text_delta",
+            "text": "稳定性相关，尤其"
+          },
+          {
+            "type": "text_delta",
+            "text": "5GHz承载约"
+          },
+          {
+            "type": "text_delta",
+            "text": "10台高"
+          },
+          {
+            "type": "text_delta",
+            "text": "活跃终端，存在"
+          },
+          {
+            "type": "text_delta",
+            "text": "射频资源争"
+          },
+          {
+            "type": "text_delta",
+            "text": "抢风险  \n "
+          },
+          {
+            "type": "text_delta",
+            "text": " - 收货"
+          },
+          {
+            "type": "text_delta",
+            "text": "地址：青梧"
+          },
+          {
+            "type": "text_delta",
+            "text": "路199"
+          },
+          {
+            "type": "text_delta",
+            "text": "号，旧机"
+          },
+          {
+            "type": "text_delta",
+            "text": "上门取件及"
+          },
+          {
+            "type": "text_delta",
+            "text": "新机寄送"
+          },
+          {
+            "type": "text_delta",
+            "text": "均为此地址  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 后"
+          },
+          {
+            "type": "text_delta",
+            "text": "续处理：工程师"
+          },
+          {
+            "type": "text_delta",
+            "text": "将上门进行负载"
+          },
+          {
+            "type": "text_delta",
+            "text": "压力测试、信"
+          },
+          {
+            "type": "text_delta",
+            "text": "道分析及射"
+          },
+          {
+            "type": "text_delta",
+            "text": "频模块检测；"
+          },
+          {
+            "type": "text_delta",
+            "text": "若确认为硬件"
+          },
+          {
+            "type": "text_delta",
+            "text": "问题，支持换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货并恢复原有"
+          },
+          {
+            "type": "text_delta",
+            "text": "无线设置"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-flash",
+            "prompt_tokens": 1446,
+            "completion_tokens": 358,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "fast",
+          "message_count": 1,
+          "tool_names": [],
+          "prompt_sha256": "8be5c3d8307f19f52c0ff888e401e66b1f6c861499e6eda5213788fd9fd8dbbf"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "-"
+          },
+          {
+            "type": "text_delta",
+            "text": " 订单"
+          },
+          {
+            "type": "text_delta",
+            "text": "号"
+          },
+          {
+            "type": "text_delta",
+            "text": "：AZ-2"
+          },
+          {
+            "type": "text_delta",
+            "text": "0260"
+          },
+          {
+            "type": "text_delta",
+            "text": "701-"
+          },
+          {
+            "type": "text_delta",
+            "text": "0042"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n- 金额"
+          },
+          {
+            "type": "text_delta",
+            "text": "：未提及  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "- 时间：购买"
+          },
+          {
+            "type": "text_delta",
+            "text": "约半年前，"
+          },
+          {
+            "type": "text_delta",
+            "text": "故障集中于晚"
+          },
+          {
+            "type": "text_delta",
+            "text": "8–9点"
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n- 用户诉求"
+          },
+          {
+            "type": "text_delta",
+            "text": "：换货不"
+          },
+          {
+            "type": "text_delta",
+            "text": "退款，保留R"
+          },
+          {
+            "type": "text_delta",
+            "text": "68 Pro型号"
+          },
+          {
+            "type": "text_delta",
+            "text": "；后续联系安排"
+          },
+          {
+            "type": "text_delta",
+            "text": "在工作日1"
+          },
+          {
+            "type": "text_delta",
+            "text": "9:00"
+          },
+          {
+            "type": "text_delta",
+            "text": "后  \n-"
+          },
+          {
+            "type": "text_delta",
+            "text": " 已确认结论："
+          },
+          {
+            "type": "text_delta",
+            "text": "  \n  -"
+          },
+          {
+            "type": "text_delta",
+            "text": " 路由器"
+          },
+          {
+            "type": "text_delta",
+            "text": "型号：R6"
+          },
+          {
+            "type": "text_delta",
+            "text": "8 Pro  \n "
+          },
+          {
+            "type": "text_delta",
+            "text": " - 故障"
+          },
+          {
+            "type": "text_delta",
+            "text": "现象：5GHz"
+          },
+          {
+            "type": "text_delta",
+            "text": "频段每日断"
+          },
+          {
+            "type": "text_delta",
+            "text": "流多次（每次"
+          },
+          {
+            "type": "text_delta",
+            "text": "约十几秒），"
+          },
+          {
+            "type": "text_delta",
+            "text": "2.4GHz"
+          },
+          {
+            "type": "text_delta",
+            "text": "正常；重启后"
+          },
+          {
+            "type": "text_delta",
+            "text": "暂稳约3"
+          },
+          {
+            "type": "text_delta",
+            "text": "0分钟，复"
+          },
+          {
+            "type": "text_delta",
+            "text": "现周期一致  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 使用环境"
+          },
+          {
+            "type": "text_delta",
+            "text": "：无摔碰"
+          },
+          {
+            "type": "text_delta",
+            "text": "、进水，"
+          },
+          {
+            "type": "text_delta",
+            "text": "放置客厅电视柜"
+          },
+          {
+            "type": "text_delta",
+            "text": "，使用正常  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 高"
+          },
+          {
+            "type": "text_delta",
+            "text": "发时段：晚"
+          },
+          {
+            "type": "text_delta",
+            "text": "8–9点"
+          },
+          {
+            "type": "text_delta",
+            "text": "（家庭设备集中"
+          },
+          {
+            "type": "text_delta",
+            "text": "接入时）  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 已"
+          },
+          {
+            "type": "text_delta",
+            "text": "排查项：固"
+          },
+          {
+            "type": "text_delta",
+            "text": "件版本为V"
+          },
+          {
+            "type": "text_delta",
+            "text": "3.2."
+          },
+          {
+            "type": "text_delta",
+            "text": "1（最新版"
+          },
+          {
+            "type": "text_delta",
+            "text": "），排除固件"
+          },
+          {
+            "type": "text_delta",
+            "text": "升级问题；信"
+          },
+          {
+            "type": "text_delta",
+            "text": "道设为1"
+          },
+          {
+            "type": "text_delta",
+            "text": "49后白天"
+          },
+          {
+            "type": "text_delta",
+            "text": "稳定但夜间仍"
+          },
+          {
+            "type": "text_delta",
+            "text": "断流；频"
+          },
+          {
+            "type": "text_delta",
+            "text": "宽由16"
+          },
+          {
+            "type": "text_delta",
+            "text": "0MHz改为8"
+          },
+          {
+            "type": "text_delta",
+            "text": "0MHz后断"
+          },
+          {
+            "type": "text_delta",
+            "text": "流频率略降"
+          },
+          {
+            "type": "text_delta",
+            "text": "但穿墙性能"
+          },
+          {
+            "type": "text_delta",
+            "text": "下降  \n  -"
+          },
+          {
+            "type": "text_delta",
+            "text": " 初步判断"
+          },
+          {
+            "type": "text_delta",
+            "text": "：非信道"
+          },
+          {
+            "type": "text_delta",
+            "text": "干扰或固件"
+          },
+          {
+            "type": "text_delta",
+            "text": "问题，更可能"
+          },
+          {
+            "type": "text_delta",
+            "text": "与设备负载能力"
+          },
+          {
+            "type": "text_delta",
+            "text": "、散热或硬件"
+          },
+          {
+            "type": "text_delta",
+            "text": "稳定性相关，尤其"
+          },
+          {
+            "type": "text_delta",
+            "text": "5GHz承载约"
+          },
+          {
+            "type": "text_delta",
+            "text": "10台高"
+          },
+          {
+            "type": "text_delta",
+            "text": "活跃终端，存在"
+          },
+          {
+            "type": "text_delta",
+            "text": "射频资源争"
+          },
+          {
+            "type": "text_delta",
+            "text": "抢风险  \n "
+          },
+          {
+            "type": "text_delta",
+            "text": " - 收货"
+          },
+          {
+            "type": "text_delta",
+            "text": "地址：青梧"
+          },
+          {
+            "type": "text_delta",
+            "text": "路199"
+          },
+          {
+            "type": "text_delta",
+            "text": "号，旧机"
+          },
+          {
+            "type": "text_delta",
+            "text": "上门取件及"
+          },
+          {
+            "type": "text_delta",
+            "text": "新机寄送"
+          },
+          {
+            "type": "text_delta",
+            "text": "均为此地址  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 日志"
+          },
+          {
+            "type": "text_delta",
+            "text": "证据：系统日"
+          },
+          {
+            "type": "text_delta",
+            "text": "志显示“无线"
+          },
+          {
+            "type": "text_delta",
+            "text": "模块自动重启”"
+          },
+          {
+            "type": "text_delta",
+            "text": "时间与断流"
+          },
+          {
+            "type": "text_delta",
+            "text": "完全吻合，"
+          },
+          {
+            "type": "text_delta",
+            "text": "属典型硬件级"
+          },
+          {
+            "type": "text_delta",
+            "text": "异常，符合换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货判定标准  \n"
+          },
+          {
+            "type": "text_delta",
+            "text": "  - 处"
+          },
+          {
+            "type": "text_delta",
+            "text": "理方案：确认"
+          },
+          {
+            "type": "text_delta",
+            "text": "进入售后流程，"
+          },
+          {
+            "type": "text_delta",
+            "text": "直接换货（"
+          },
+          {
+            "type": "text_delta",
+            "text": "同型号R6"
+          },
+          {
+            "type": "text_delta",
+            "text": "8 Pro）；"
+          },
+          {
+            "type": "text_delta",
+            "text": "优先安排工程师上门"
+          },
+          {
+            "type": "text_delta",
+            "text": "检测，当场确认"
+          },
+          {
+            "type": "text_delta",
+            "text": "故障后登记换"
+          },
+          {
+            "type": "text_delta",
+            "text": "货，新机"
+          },
+          {
+            "type": "text_delta",
+            "text": "3个工作日内发出"
+          },
+          {
+            "type": "text_delta",
+            "text": "；旧机按"
+          },
+          {
+            "type": "text_delta",
+            "text": "用户要求预约工作"
+          },
+          {
+            "type": "text_delta",
+            "text": "日19:"
+          },
+          {
+            "type": "text_delta",
+            "text": "00后上门"
+          },
+          {
+            "type": "text_delta",
+            "text": "取件  \n "
+          },
+          {
+            "type": "text_delta",
+            "text": " - 特殊"
+          },
+          {
+            "type": "text_delta",
+            "text": "服务：VIP会员"
+          },
+          {
+            "type": "text_delta",
+            "text": "（VIP-7"
+          },
+          {
+            "type": "text_delta",
+            "text": "749）"
+          },
+          {
+            "type": "text_delta",
+            "text": "享“先换"
+          },
+          {
+            "type": "text_delta",
+            "text": "后收”服务"
+          },
+          {
+            "type": "text_delta",
+            "text": "，新机原"
+          },
+          {
+            "type": "text_delta",
+            "text": "封未拆，"
+          },
+          {
+            "type": "text_delta",
+            "text": "发货前通过短信"
+          },
+          {
+            "type": "text_delta",
+            "text": "及站内信"
+          },
+          {
+            "type": "text_delta",
+            "text": "双渠道通知物流"
+          },
+          {
+            "type": "text_delta",
+            "text": "信息  \n  -"
+          },
+          {
+            "type": "text_delta",
+            "text": " 回收要求"
+          },
+          {
+            "type": "text_delta",
+            "text": "：需提供主机"
+          },
+          {
+            "type": "text_delta",
+            "text": "、原装电源"
+          },
+          {
+            "type": "text_delta",
+            "text": "适配器、"
+          },
+          {
+            "type": "text_delta",
+            "text": "原装网线"
+          },
+          {
+            "type": "text_delta",
+            "text": "、原彩盒"
+          },
+          {
+            "type": "text_delta",
+            "text": "；说明书缺失不影响"
+          },
+          {
+            "type": "text_delta",
+            "text": "回收，不扣"
+          },
+          {
+            "type": "text_delta",
+            "text": "费"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-flash",
+            "prompt_tokens": 1715,
+            "completion_tokens": 501,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      }
+    ]
+  }
+}
