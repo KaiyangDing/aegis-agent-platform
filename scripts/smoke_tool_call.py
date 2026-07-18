@@ -32,7 +32,7 @@ async def main() -> None:
         messages=[Message(role="user", content="杭州现在天气怎么样？")],
         tools=[weather],
     )
-    async for chunk in provider.complete(req, model="qwen3.7-plus"):
+    async for chunk in provider.complete(req, model="qwen-plus"):
         print(chunk)
 
 

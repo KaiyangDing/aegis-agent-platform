@@ -17,7 +17,7 @@ async def main() -> None:
         resp = await client.post(
             f"{s.dashscope_base_url}/chat/completions",
             headers={"Authorization": f"Bearer {s.dashscope_api_key.get_secret_value()}"},
-            json={"model": "qwen3.7-plus", "messages": [{"role": "user", "content": "你好"}]},
+            json={"model": "qwen-plus", "messages": [{"role": "user", "content": "你好"}]},
         )
     print("== 状态行 ==")
     print(resp.status_code, resp.reason_phrase, resp.http_version)

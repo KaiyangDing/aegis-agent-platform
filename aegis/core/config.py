@@ -31,12 +31,13 @@ class Settings(BaseSettings):
     # —— 网关路由与限流（M1.9）——
     # 档位 → 候选链（"provider:model"，按序 fallback）。环境变量可用 JSON 覆盖。
     model_routes: dict[str, list[str]] = {
-        # 2026-07-16 模型池变更（账号额度）：仅 qwen3.7-plus / qwen3.7-max / glm5.2 可用。
-        # glm5.2 接任 deepseek-v3 的"同平台异族容灾"角色；fast 档失去专属廉价模型，
-        # 与 standard 同链（首选 qwen3.7-plus；若 glm5.2 价更低可调序——改这里不改代码）
-        "fast": ["bailian:qwen3.7-plus", "bailian:glm5.2"],
-        "standard": ["bailian:qwen3.7-plus", "bailian:glm5.2"],
-        "strong": ["bailian:qwen3.7-max", "bailian:glm5.2"],
+        # 2026-07-17 模型池重构：充值解锁 classic 梯队，按"便宜优先"分层；幻影 glm5.2 移除
+        # ——07-16 写入的容灾候选实测 404 model_not_found（入池未实测的代价，三档 fallback
+        # 断链两日）。入池三验纪律见 06 §5：存在性 / 思考默认态 / 关思考参数接受性。
+        # qwen3.7-max 默认思考，已由适配器统一 enable_thinking:false（openai_compat）
+        "fast": ["bailian:qwen-flash", "bailian:qwen-turbo"],
+        "standard": ["bailian:qwen-plus", "bailian:qwen-turbo"],
+        "strong": ["bailian:qwen3.7-max", "bailian:qwen-plus"],
     }
     # gt=0：速率写成 0 会让 Lua 里 capacity/rate 溢出，环境变量写错要在启动时炸
     provider_rate: float = Field(default=8.0, gt=0)  # 每供应商出站 QPS（演示值，压测后调）
@@ -48,9 +49,11 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 300  # 精确缓存 TTL；0 = 关闭缓存
     # 模型单价（元/千 token，[输入, 输出]）——演示值，以百炼价目页为准；调价改这里不改代码
     model_prices: dict[str, list[float]] = {
-        "qwen3.7-plus": [0.0008, 0.002],  # 演示值——务必按百炼价目页更新
+        "qwen-flash": [0.00015, 0.0015],  # 演示值——务必按百炼价目页更新（#28）
+        "qwen-turbo": [0.0003, 0.0006],  # 演示值——同上
+        "qwen-plus": [0.0008, 0.002],  # 演示值——同上
         "qwen3.7-max": [0.0024, 0.0096],  # 演示值——同上
-        "glm5.2": [0.002, 0.008],  # 演示值——同上
+        "qwen3.7-plus": [0.0008, 0.002],  # 演示值——已退出路由，保留供历史账本行核对
     }
     tenant_monthly_token_budget: int = 0  # 租户月度 token 预算；0=关闭，超额抛 BudgetExceeded
     request_token_budget: int = 0  # 单请求 token 预算（估算口径）；0=关闭（§10.1 #1，三级预算 L1 级）
