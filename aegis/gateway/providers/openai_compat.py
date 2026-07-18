@@ -150,6 +150,13 @@ class OpenAICompatProvider:
             "messages": [self._to_wire_message(m) for m in req.messages],
             "stream": True,
             "stream_options": {"include_usage": True},
+            # 2026-07-17：思考型模型（qwen3.7 系）默认先流 reasoning_content，本适配器不消费
+            # 思考流——重试层"首块 25s"卡解析后首 chunk 会被饿死（M2.11 五跑 fail-open 根因），
+            # 且隐藏思考 token 计入 completion 计费（探针实测 54→4 塌缩）。平台不消费思考，
+            # 统一关闭；池内全系模型已实测接受本参数（入池三验，plans/m2.11 偏差 #12）。
+            # 注意：这是 DashScope/qwen 方言参数——本适配器实例仅服务 bailian，挪用到其他
+            # OpenAI 兼容端点前需复核该参数的接受性
+            "enable_thinking": False,
         }
         if req.tools:
             payload["tools"] = [

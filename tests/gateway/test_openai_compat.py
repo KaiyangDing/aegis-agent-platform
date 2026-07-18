@@ -69,6 +69,8 @@ async def test_payload_requests_streaming_with_usage():
     sent = json.loads(route.calls.last.request.content)
     assert sent["stream"] is True
     assert sent["stream_options"] == {"include_usage": True}
+    # 2026-07-17 全池关思考：思考流会饿死首块 25s 计时器且 completion 计费虚高（00 §2.2 C1 补注）
+    assert sent["enable_thinking"] is False
     assert sent["messages"] == [{"role": "user", "content": "你好"}]
     assert route.calls.last.request.headers["Authorization"] == "Bearer sk-test"
 
