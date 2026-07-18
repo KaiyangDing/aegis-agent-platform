@@ -1,0 +1,10 @@
+== 阶段 1：起 run（session=demo-pg-05d13e59），等待你在窗口内停 PG ==
+  seq=1  user_message
+  seq=2  llm_call
+  seq=3  llm_result
+  捕获 EventStoreUnavailable：事件写入重试 3 次仍失败——事实源不可用，终止本次 run
+== 阶段 2：请 docker start aegis-postgres，脚本轮询等它回来 ==
+  核验：内存副作用计数=1；已落盘 tool_call=1；tool_result=0
+  核验式成立：副作用计数 == 已落盘 tool_call 数（write-ahead：无事件即无副作用；
+  本例副作用发生在停库前属正常——tool_result 未落盘 = 结果不明路径，恢复语义由 M2.10 承接）
+结论：事实源不可用 = 服务不可用——退避 0.1/0.2/0.4s 后明确终止，错误文本点名死因；无半执行副作用

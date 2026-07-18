@@ -1,0 +1,9 @@
+前置确认：Redis 不可达（TimeoutError）——演示条件成立
+并发两协程抢同一会话锁 session=demo-lock-bcf0c127
+  协程 A acquire -> True；协程 B acquire -> False
+  恰一个获锁成功（PG advisory 在降级期承接互斥）
+  赢家释放 -> True
+  输家重试 acquire -> True（释放后可得）
+  输家释放 -> True
+结论：Redis 不可用期间互斥语义由 PG advisory lock 保住——降级换后端，不放弃锁（M2.9 C4）
+收尾提醒：docker start aegis-redis

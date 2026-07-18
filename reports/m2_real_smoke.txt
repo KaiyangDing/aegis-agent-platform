@@ -1,0 +1,10 @@
+M2.12 真实冒烟凭证（真实调用例外②——M2 最后一处；只断不变量，不断回答文本）
+session_id：smoke-eacc961ed6d4；档位 standard；事件 11 条；账本模型：['qwen-plus']
+事件类型序列：['user_message', 'llm_call', 'llm_result', 'tool_call', 'tool_result', 'tool_call', 'tool_result', 'llm_call', 'llm_result', 'assistant_message', 'loop_terminated']
+不变量① 无重复副作用：下游幂等键 1 把零重复；孤儿 tool_call=0；键重复组=0
+不变量② seq 连续合法：1..11 无空洞
+不变量③ 合法终止：reason=completed（合法集=TerminationReason 去 gateway_rejected）
+成本（账本实测）：¥0.001004 ≤ 顶 ¥0.10（预算三道写死本脚本）
+口径注记：CACHE_TTL_SECONDS=0 防缓存命中冒充真实调用；00 §6.2 第 7 项结构保证——
+  真实调用只存在于 scripts/（本脚本与 record_long_dialog.py），tests/ 全 FakeGateway，
+  CI 工作流无 DASHSCOPE_API_KEY 注入。

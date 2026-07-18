@@ -1,0 +1,23 @@
+== 阶段 1：起 run 至挂起（session=demo-hitl-f522d90d）==
+  seq=1  user_message
+  seq=2  llm_call
+  seq=3  llm_result
+  seq=4  approval_requested
+  审批单：id=46ed8f0cb0714d72b5b35dae675d45ab status=pending tool=refund_apply args={'amount': 350, 'order_id': 'A-350'} expires_at=2026-07-18 16:42:14.002616+00:00
+  run_state=awaiting_approval（awaiting_approval）；run 已干净返回、无 loop_terminated
+  —— 进程此刻可下线：恢复段用全新 Runtime/网关实例模拟重启 ——
+== 阶段 2：坐席决策（decide CAS）==
+  decide(approved=True, operator=op-demo) -> True
+  第二次 decide 同单 -> False（CAS 赢家恰一个）
+== 阶段 3：恢复单入口续跑 ==
+  seq=5  approval_decided
+  seq=6  tool_call
+  seq=7  tool_result
+  seq=8  llm_call
+  seq=9  llm_result
+  seq=10  assistant_message
+  seq=11  loop_terminated
+  终止原因=completed；工具真执行幂等键=['db8dac2d912d48fe9c396e19add73d86']
+  审批单终态：status=approved operator_id=op-demo event_id=db8dac2d912d48fe9c396e19add73d86（审计链回填）
+  run_state=idle（idle 归位）
+结论：挂起→审批→恢复全链闭合；审批回调只翻状态、恢复统一走单入口（必保路径，00 §6.2 第 5 项）
