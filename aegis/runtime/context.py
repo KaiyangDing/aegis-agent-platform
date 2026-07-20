@@ -40,6 +40,12 @@ _TURN_TEMPLATE = "第 {index} 轮\n用户：{user}\n助手：{assistant}\n"
 """D8：摘要输入的逐轮拼接格式。参与 M2.6 摘要调用道的 cassette 匹配——散落 f-string
 会让 prompt 微调防不胜防，钉死为常量。"""
 
+_SUMMARY_PROMPT_SHARE = 0.5
+"""摘要在历史层版面的最大份额（复盘补丁三，2026-07-19）：仅当有 uncovered 近轮排队时生效
+——摘要给近轮让位（关闭"肥摘要独占版面→最新轮盲窗"），无人排队则不设限、版面不白扣。
+纯 prompt 版面策略：事件永存模型原话（落库 clip 与生成侧 max_tokens 经议双双否决——
+前者让租户策略污染不可变事实，后者把解码级半句残话写进事实源）。"""
+
 
 @dataclass(frozen=True, slots=True)
 class ScoredSnippet:
@@ -333,6 +339,10 @@ class ContextBuilder:
         if summary_text is not None and remaining > 0:
             header = _SUMMARY_HEADER.format(turn_from=1, turn_to=covered)
             allowed = remaining - estimate_tokens(header)
+            # 复盘补丁三：有近轮排队时，摘要至多占版面份额——最新轮的保底席位是结构保证；
+            # uncovered 空则不设限（摘要此时是历史层唯一载体，砍它只有损失）
+            if uncovered:
+                allowed = int(allowed * _SUMMARY_PROMPT_SHARE)
             if estimate_tokens(summary_text) <= allowed:
                 body = summary_text
             else:

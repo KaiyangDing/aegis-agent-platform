@@ -230,7 +230,13 @@ async def test_at_most_one_summarize_per_build(db_session_factory) -> None:
 
 
 async def test_oversized_summary_clipped(db_session_factory) -> None:
-    """I5/I7：钩子返超长摘要 ⇒ 事件存全文（原文入流），prompt 侧 _clip 截断、历史层 ≤ 预算。"""
+    """I5/I7：钩子返超长摘要 ⇒ 事件存全文（原文入流），prompt 侧 _clip 截断、历史层 ≤ 预算。
+
+    口径经复盘补丁三两轮议定（2026-07-19）：落库 clip 与生成侧 max_tokens 双双否决——
+    事件是事实源、模型原话入流（X4），租户策略不得污染不可变事实，解码级硬截断会把
+    半句残话写进事实源；prompt 版面由插入期份额 clip 保护（_SUMMARY_PROMPT_SHARE，
+    见 cs-14/cs-15）。
+    """
     await _seed_session(db_session_factory, "cs-11")
     await _seed_turns(db_session_factory, "cs-11", 4)
     b, _ = await _make(db_session_factory, "cs-11", summarize=_Hook("超" * 500))
@@ -270,3 +276,35 @@ async def test_events_raw_untouched_by_summary(db_session_factory) -> None:
     assert user_payloads == [_u(1), _u(2), _u(3), _u(4)]  # 被压缩的 1、2 轮原文仍在
     assert [t for t, _ in rows].count("assistant_message") == 4
     assert [t for t, _ in rows].count("summary_updated") == 1
+
+
+async def test_summary_prompt_share_caps_when_turns_queue(db_session_factory) -> None:
+    """复盘补丁三：有近轮排队时摘要至多占版面份额——肥摘要不再独占历史层（最新轮盲窗关闭）。
+
+    预算账（budget_h=100）：header 9 → allowed=91 → 份额 45；肥摘要 clip 至 45（含尾注）
+    → 摘要条 54，余 46 → 恰容最新一轮 t4（30），t3 仍让位——最新轮的席位是结构保证。
+    """
+    await _seed_session(db_session_factory, "cs-14")
+    await _seed_turns(db_session_factory, "cs-14", 4)
+    b, _ = await _make(db_session_factory, "cs-14", summarize=_Hook("超" * 500))
+    out = await b.build(system_prompt="规则", user_input="问")
+    contents = [m.content for m in out]
+    assert _u(4) in contents  # 最新轮进场——修复的靶心
+    assert _a(4) in contents
+    assert _u(3) not in contents  # 次新轮仍装不下：份额是保底席位不是无限席位
+    summary_msg = next(m for m in out if _CLIP_SUFFIX in m.content)
+    assert summary_msg.content.startswith(_SUMMARY_HEADER.format(turn_from=1, turn_to=2))
+    assert sum(_message_tokens(m) for m in out[1:-1]) <= 100
+
+
+async def test_summary_share_not_applied_without_queue(db_session_factory) -> None:
+    """份额只在"有近轮排队"时生效：全部轮次已被覆盖 ⇒ 摘要可占满 allowed，版面不白扣。"""
+    await _seed_session(db_session_factory, "cs-15")
+    await _seed_turns(db_session_factory, "cs-15", 2)
+    w = await EventWriter.open(db_session_factory, "cs-15", "r-old-sum")
+    await w.append(EventType.SUMMARY_UPDATED, {"summary": "长" * 70, "turn_from": 1, "turn_to": 2})
+    b, _ = await _make(db_session_factory, "cs-15")
+    out = await b.build(system_prompt="规则", user_input="问")
+    summary_msg = next(m for m in out if m.content.startswith(_SUMMARY_HEADER.format(turn_from=1, turn_to=2)))
+    assert "长" * 70 in summary_msg.content  # est 70 > 份额 45 但 ≤ allowed 91：未被份额刀裁
+    assert _CLIP_SUFFIX not in summary_msg.content
