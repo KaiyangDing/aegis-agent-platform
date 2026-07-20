@@ -158,6 +158,18 @@ INJECTION_RULES_V1: tuple[InjectionRule, ...] = (
         pattern=re.compile(r"(内部|可用|你的)[^。！？\n]{0,4}(工具|函数)(名|列表|清单)"),
         severity=Suspicion.MEDIUM,
     ),
+    # 探内部工具面（英文，补丁四）：必须锚定"列举工具清单本身"的语义——
+    # your/available/internal + tools，或 list/enumerate + tools，或 what tools do you have；
+    # 挡掉业务问句 "which tool should I use" / "what tools can help me"（问用途非探清单）
+    InjectionRule(
+        name="tool_probe_en",
+        pattern=re.compile(
+            r"(?i)\b(your|available|internal)\s+(tools?|functions?)\b"
+            r"|\b(list|enumerate)\b[^.!?\n]{0,12}\b(tools?|functions?)\b"
+            r"|\bwhat\s+(tools?|functions?)\b[^.!?\n]{0,12}\b(do you have|are available|can you (use|call|access))\b"
+        ),
+        severity=Suspicion.MEDIUM,
+    ),
     # 冒充权威：真管理员走认证通道不靠嘴上声明；但用户自述身份也可能无害——MEDIUM
     InjectionRule(
         name="authority_claim",
@@ -174,7 +186,7 @@ INJECTION_RULES_V1: tuple[InjectionRule, ...] = (
         severity=Suspicion.MEDIUM,
     ),
 )
-"""v1 规则集（14 条）。规则名集合与档位是契约（进审计 payload 与值快照测试）；
+"""v1 规则集（15 条）。规则名集合与档位是契约（进审计 payload 与值快照测试）；
 正则字面量允许微调迭代——每条一枚攻击样本 + 全部良性样本在测试里钉行为。"""
 
 Classifier = Callable[[str], Awaitable[Suspicion]]
