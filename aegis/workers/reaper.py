@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -63,17 +63,27 @@ class ReapReport:
     abandoned: tuple[str, ...]
 
 
-async def _session_snapshot(factory: SessionFactory, session_id: str) -> tuple[int, str | None, str]:
-    """(recovery_count, lease_owner, run_state)——超限判定与审计 payload 的读源。"""
+async def _session_snapshot(
+    factory: SessionFactory, session_id: str, *, now: datetime | None = None
+) -> tuple[int, str | None, str, bool]:
+    """(recovery_count, lease_owner, run_state, lease_alive)——超限判定与审计 payload 的读源。
+
+    lease_alive 在 DB 端算（时钟纪律：func.now()、now 可注入——复盘补丁五）：判死前必须
+    确认无人在场——活租约=有合法持有者正在恢复（可能正是第 limit 次），让行。
+    """
+    cutoff = func.now() if now is None else now
     async with factory() as s:
         row = (
             await s.execute(
-                select(SessionRecord.recovery_count, SessionRecord.lease_owner, SessionRecord.run_state).where(
-                    SessionRecord.id == session_id
-                )
+                select(
+                    SessionRecord.recovery_count,
+                    SessionRecord.lease_owner,
+                    SessionRecord.run_state,
+                    and_(SessionRecord.lease_expires_at.is_not(None), SessionRecord.lease_expires_at > cutoff),
+                ).where(SessionRecord.id == session_id)
             )
         ).one_or_none()
-    return (0, None, "") if row is None else (row[0], row[1], row[2])
+    return (0, None, "", False) if row is None else (row[0], row[1], row[2], bool(row[3]))
 
 
 async def reap_once(
@@ -88,7 +98,7 @@ async def reap_once(
     """扫一轮：list_expired → 逐会话 steal（赢家恢复）/ 超限走 C9 终局。
 
     C9 终局（偏差 #7）：恰一次判定权在 T5 翻转（SessionStateStore.transition 的 CAS）——
-    顺序 = 查快照判超限 → transition 判赢 → clear_lease 清扫 → 写审计事件；崩在缝上 =
+    顺序 = 查快照(活租约让行)判超限 → transition 判赢 → clear_lease 清扫 → 写审计事件；崩在缝上 =
     failed 无审计事件（接受，无谎言方向）。钩子异常批内隔离（P6）：reaper 是调度器
     不是执行器，单会话钩子炸不中断整批——该会话由后续轮次/C9 兜底，日志留痕。
     """
@@ -111,10 +121,12 @@ async def reap_once(
             except Exception:
                 logger.exception("恢复钩子异常（批内隔离，P6）：session=%s", sid)
             continue
-        # steal 打空：被并发赢家抢走，或已超限——查快照分辨（count 单调增，判定不会回退）
-        count, last_owner, run_state = await _session_snapshot(factory, sid)
-        if count < recovery_limit or run_state != RunState.RUNNING.value:
-            continue  # 被并发赢家拿走 / 已被别的 reaper 置 failed
+        # steal 打空：被并发赢家抢走 / 原主自愈 / 已被判死 / 或已超限——查快照分辨
+        # （count 单调增，判定不会回退；复盘补丁五：活租约=有合法持有者正在恢复——
+        # 可能正是第 limit 次，判死谓词只看 count+state 会掐掉进行中的救援，让行）
+        count, last_owner, run_state, lease_alive = await _session_snapshot(factory, sid, now=now)
+        if lease_alive or count < recovery_limit or run_state != RunState.RUNNING.value:
+            continue  # 有人在场（让行）/ 被并发赢家拿走 / 已被别的 reaper 置 failed
         if not await states.transition(sid, expected=RunState.RUNNING, to=RunState.FAILED):
             continue  # T5 输家安静（恰一次判定权在此，偏差 #7）
         await leases.clear_lease(sid)

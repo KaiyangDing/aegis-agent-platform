@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from aegis.runtime.events import EventType
 from aegis.runtime.store import EventRecord, EventWriter, RunState, SessionRecord
@@ -164,3 +164,54 @@ async def test_resume_hook_failure_does_not_break_batch(db_session_factory) -> N
     )
     assert {"rp-8a", "rp-8b"} <= set(report.recovered)
     assert [s for s in seen if s.startswith("rp-8")] == ["rp-8a", "rp-8b"]  # 第二个会话的钩子照常被调
+
+
+async def test_verdict_stands_down_while_lease_alive(db_session_factory) -> None:
+    """复盘补丁五：判死前查租约活性——并发 reaper 正持第 limit 次合法恢复时让行，不掐进行中救援。
+
+    用钩子模拟竞态交错：本 reaper 处理 rp-9a 的钩子期间，"对手 reaper"抢走 rp-9b
+    （count 2→3、租约刷活）——本 reaper 随后 steal 打空、快照见 count=limit∧running：
+    旧谓词（只看 count+state）会 T5 判死并清掉对手的活租约；新谓词见活租约让行。
+    """
+    await _mk(db_session_factory, "rp-9a", owner="dead:1", expires_in_s=-20)
+    await _mk(db_session_factory, "rp-9b", owner="dead:2", expires_in_s=-10, recovery_count=2)
+
+    async def simulate_rival_steal(session_id: str, owner: str, generation: int) -> None:
+        if session_id != "rp-9a":
+            return
+        now = await _db_now(db_session_factory)
+        async with db_session_factory() as s:
+            async with s.begin():
+                await s.execute(
+                    update(SessionRecord)
+                    .where(SessionRecord.id == "rp-9b")
+                    .values(
+                        lease_owner="reaper:rival",
+                        lease_expires_at=now + timedelta(seconds=60),
+                        lease_generation=SessionRecord.lease_generation + 1,
+                        recovery_count=3,
+                    )
+                )
+
+    report = await reap_once(
+        db_session_factory, owner="reaper:9", lease_ttl_s=60.0, recovery_limit=3, resume=simulate_rival_steal
+    )
+    assert "rp-9a" in report.recovered
+    assert "rp-9b" not in report.abandoned  # 让行：不判死进行中的最后一次合法恢复
+    row = await _row(db_session_factory, "rp-9b")
+    assert row.run_state == RunState.RUNNING.value  # 未被 T5
+    assert row.lease_owner == "reaper:rival"  # 对手的活租约原封未清
+    async with db_session_factory() as s:
+        audits = (
+            (
+                await s.execute(
+                    select(EventRecord).where(
+                        EventRecord.session_id == "rp-9b",
+                        EventRecord.type == EventType.RECOVERY_ABANDONED.value,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert audits == []  # 零审计事件：让行是无为
