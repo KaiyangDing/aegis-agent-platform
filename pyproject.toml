@@ -6,11 +6,14 @@ dependencies = [
     "alembic>=1.18.5",
     "asyncpg>=0.31.0",
     "celery>=5.5",
+    "fastapi>=0.139.2",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
+    "pyjwt>=2.13.0",
     "redis>=8.0.1",
     "sqlalchemy[asyncio]>=2.0.51",
+    "uvicorn>=0.51.0",
 ]
 
 [dependency-groups]
@@ -55,11 +58,11 @@ asyncio_mode = "auto"          # async def 的测试函数自动被识别，不�
 root_package = "aegis"
 
 [[tool.importlinter.contracts]]
-name = "分层依赖只能向下：apps → runtime → gateway → core"
+name = "分层依赖只能向下：api|workers → apps → runtime → gateway → core"
 type = "layers"
 layers = [
+    "aegis.api | aegis.workers",
     "aegis.apps",
-    "aegis.workers",
     "aegis.runtime",
     "aegis.gateway",
     "aegis.core",

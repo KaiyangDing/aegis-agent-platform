@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     reaper_interval_s: float = Field(default=30.0, gt=0)  # beat 扫描周期（P2：发现延迟上界≈TTL+周期=90s）
     recovery_limit: int = Field(default=3, ge=1)  # C9：恢复次数上限（P3）
 
+    # —— API 认证（M3.1，P2 拍板：HS256 双密钥窗）——
+    jwt_secret: SecretStr = SecretStr("")  # 签发/验签密钥；空=API 认证不可用（auth.py fail-loud）
+    jwt_secret_previous: SecretStr = SecretStr("")  # 轮换窗旧钥：验签先 current 再 previous，轮换不踢在线用户
+    jwt_user_ttl_s: int = Field(default=7200, gt=0)  # 终端用户 token 时长 2h
+    jwt_staff_ttl_s: int = Field(default=28800, gt=0)  # 坐席/管理员 token 时长 8h
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
