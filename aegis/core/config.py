@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     jwt_user_ttl_s: int = Field(default=7200, gt=0)  # 终端用户 token 时长 2h
     jwt_staff_ttl_s: int = Field(default=28800, gt=0)  # 坐席/管理员 token 时长 8h
 
+    # —— API 入站（M3.2）——
+    inbound_rate: float = Field(default=2.0, gt=0)  # 每租户入站 QPS（演示值；与 L1 出站限流分工——02 §1）
+    inbound_burst: float = Field(default=5.0, gt=0)
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
