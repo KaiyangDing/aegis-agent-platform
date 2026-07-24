@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from aegis.api.auth import Principal, require_roles
 from aegis.core.tenancy import Role
+from aegis.core.tenant_ctx import tenant_context
 
 router = APIRouter()
 
@@ -61,11 +62,14 @@ async def get_usage(
     if principal.role is not Role.ADMIN and target != principal.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="operator 仅可查看本租户用量")
     factory = request.app.state.session_factory
-    async with factory() as s:
-        detail = (await s.execute(_DETAIL_SQL, {"tid": target, "limit": limit})).mappings().all()
-        by_model = (await s.execute(_BY_MODEL_SQL, {"tid": target})).mappings().all()
-        by_day = (await s.execute(_BY_DAY_SQL, {"tid": target})).mappings().all()
-        by_session = (await s.execute(_BY_SESSION_SQL, {"tid": target})).mappings().all()
+    # M3.3②：以目标租户身份查库——tenant_context 嵌套覆盖认证层设的本租户；
+    # 没有这层，RLS 会把 admin 的跨租户视图过滤成空集（operator 时 target≡本租户，语义不变）
+    with tenant_context(target):
+        async with factory() as s:
+            detail = (await s.execute(_DETAIL_SQL, {"tid": target, "limit": limit})).mappings().all()
+            by_model = (await s.execute(_BY_MODEL_SQL, {"tid": target})).mappings().all()
+            by_day = (await s.execute(_BY_DAY_SQL, {"tid": target})).mappings().all()
+            by_session = (await s.execute(_BY_SESSION_SQL, {"tid": target})).mappings().all()
     return {
         "tenant_id": target,
         "detail": [dict(r) for r in detail],

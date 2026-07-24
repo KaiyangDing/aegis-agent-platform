@@ -21,6 +21,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from aegis.core.config import Settings
 from aegis.core.tenancy import Role
+from aegis.core.tenant_ctx import current_tenant_id
 
 _ALGORITHM = "HS256"
 _REQUIRED_CLAIMS = ["exp", "sub", "tid", "role"]
@@ -127,7 +128,7 @@ async def current_principal(request: Request) -> Principal:
         )
     settings: Settings = request.app.state.settings
     try:
-        return decode_token(
+        principal = decode_token(
             token.strip(),
             secret=settings.jwt_secret.get_secret_value(),
             previous=settings.jwt_secret_previous.get_secret_value(),
@@ -138,6 +139,10 @@ async def current_principal(request: Request) -> Principal:
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
+    # M3.3②（#18 请求路径）：验签即设租户上下文——RLS 事务钩子从此有值可抄。
+    # 只 set 不 reset：ContextVar 随本请求任务生灭，任务结束即消散，不会泄给下个请求
+    current_tenant_id.set(principal.tenant_id)
+    return principal
 
 
 def require_roles(*roles: Role) -> Callable[..., Awaitable[Principal]]:

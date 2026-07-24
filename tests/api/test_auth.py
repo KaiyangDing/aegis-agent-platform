@@ -27,6 +27,7 @@ from aegis.api.auth import (
 from aegis.api.main import create_app
 from aegis.core.config import Settings
 from aegis.core.tenancy import Role
+from aegis.core.tenant_ctx import current_tenant_id
 
 # ≥32 字节（RFC 7518 HS256 硬下限，auth.py 升为 ValueError）——短钥既触
 # PyJWT InsecureKeyLengthWarning 也过不了我们的配置检查
@@ -128,6 +129,10 @@ def _build_app() -> FastAPI:
     async def staff_only(principal: Annotated[Principal, Depends(_STAFF_ONLY)]) -> dict[str, str]:
         return {"user_id": principal.user_id}
 
+    @app.get("/ctx")
+    async def ctx(principal: Annotated[Principal, Depends(current_principal)]) -> dict[str, str | None]:
+        return {"ctx_tenant": current_tenant_id.get()}  # M3.3② 接线判据：验签即设租户上下文
+
     return app
 
 
@@ -179,3 +184,10 @@ async def test_operator_and_admin_pass_staff_endpoint(client) -> None:
         resp = await client.get("/staff-only", headers=_bearer(_token(role, uid=uid)))
         assert resp.status_code == 200, role
         assert resp.json() == {"user_id": uid}
+
+
+async def test_authed_request_sets_tenant_context(client) -> None:
+    """M3.3② 接线：current_principal 验签后设租户上下文——RLS 事务钩子从此有值可抄（#18 请求路径）。"""
+    resp = await client.get("/ctx", headers=_bearer(_token(Role.USER, uid="u-a1")))
+    assert resp.status_code == 200
+    assert resp.json() == {"ctx_tenant": "tenant-a"}

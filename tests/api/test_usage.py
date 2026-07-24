@@ -17,6 +17,7 @@ from aegis.api.auth import issue_token
 from aegis.api.main import create_app
 from aegis.core.config import Settings
 from aegis.core.tenancy import Role
+from aegis.core.tenant_ctx import current_tenant_id
 from aegis.gateway.metering import UsageRecord
 
 SECRET = "usage-test-secret-0123456789abcdef"  # ≥32B（RFC 7518 下限）
@@ -140,3 +141,29 @@ async def test_aggregates_match_seeded_rows(client) -> None:
 async def test_limit_caps_detail_newest_first(client) -> None:
     body = (await client.get("/v1/usage?limit=1", headers=_bearer(Role.OPERATOR, "op-a1"))).json()
     assert [r["request_id"] for r in body["detail"]] == ["r-a2"]  # 同钟按 id 兜底降序=最新一行
+
+
+class _CtxRecordingFactory:
+    """记录每次开会话时的租户上下文——"以目标租户身份查库"的判据（M3.3② 接线）。"""
+
+    def __init__(self, factory) -> None:
+        self._factory = factory
+        self.seen: list[str | None] = []
+
+    def __call__(self):
+        self.seen.append(current_tenant_id.get())
+        return self._factory()
+
+
+async def test_usage_queries_run_in_target_tenant_context(db_session_factory) -> None:
+    """admin 点名他租时四条查询全在目标租户上下文内跑——RLS 下跨租户视图的前提；
+    认证层设的是 admin 自家租户，端点须用 tenant_context(target) 嵌套覆盖（M3.3②）。"""
+    recording = _CtxRecordingFactory(db_session_factory)
+    app = create_app(Settings(jwt_secret=SecretStr(SECRET)), session_factory=recording)
+    await _seed_usage(db_session_factory)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/v1/usage?tenant_id=tenant-b", headers=_bearer(Role.ADMIN, "admin-a1"))
+    assert resp.status_code == 200
+    # 端点开一个会话跑四条查询（factory 恰调一次）；开会话时刻已戴目标租户的牌=
+    # tenant_context(target) 覆盖了认证层的 tenant-a（首版断言误设四次开会话——测试稿缺陷）
+    assert recording.seen == ["tenant-b"]

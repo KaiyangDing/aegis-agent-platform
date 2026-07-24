@@ -11,13 +11,13 @@ import sys
 
 from aegis.api.auth import issue_token
 from aegis.core.config import get_settings
-from aegis.core.db import get_session_factory
+from aegis.core.db import get_owner_session_factory  # 维护面（D4）：发凭证发生在任何租户上下文之前
 from aegis.core.tenancy import Role, TenantDirectory
 
 
 async def main(user_id: str) -> None:
     settings = get_settings()
-    user = await TenantDirectory(get_session_factory()).get_user(user_id)
+    user = await TenantDirectory(get_owner_session_factory()).get_user(user_id)
     if user is None:
         raise SystemExit(f"用户 {user_id} 不存在——先跑 uv run python scripts/seed_demo.py")
     role = Role(user.role)

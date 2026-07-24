@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert
 
-from aegis.core.db import get_session_factory
+from aegis.core.db import get_owner_session_factory  # 维护面（D4）：跨租户初始化不冒充任何租户
 from aegis.core.tenancy import Role, TenantRecord, UserRecord
 
 # 01 §5 两租户设定；approval_threshold=200 是租户 A 的配置项不是平台常量。
@@ -45,7 +45,7 @@ for t in ("a", "b"):
 
 
 async def main() -> None:
-    async with get_session_factory()() as s:
+    async with get_owner_session_factory()() as s:
         async with s.begin():
             for row in TENANTS:
                 stmt = insert(TenantRecord).values(**row)
