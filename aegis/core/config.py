@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     inbound_rate: float = Field(default=2.0, gt=0)  # 每租户入站 QPS（演示值；与 L1 出站限流分工——02 §1）
     inbound_burst: float = Field(default=5.0, gt=0)
 
+    # —— RLS 低权连接（M3.3，D3）——
+    # 应用运行时角色（无 BYPASSRLS）；database_url 留维护面与 alembic
+    database_url_app: str = "postgresql+asyncpg://aegis_app:aegis_app@localhost:5432/aegis"
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
