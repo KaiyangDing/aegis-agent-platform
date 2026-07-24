@@ -533,3 +533,63 @@ async def test_request_budget_zero_means_disabled():
     p1 = FakeProvider("p1", [OK_CHUNKS])
     gw, _, _ = make_gw([p1], request_token_budget=0)
     assert await collect(gw) == OK_CHUNKS
+
+
+# ---- M3.1 交付③：monthly_budget_resolver 注入缝（P3/#13/#22）----
+# resolver=None 的"落回静态 int"不变量由上方既有预算闸门测试群整体作证（零改动全绿），
+# 本组只钉 resolver 在场后的四条新语义。
+
+
+class StubResolver:
+    """可编程预算源：记录被问过的租户（断言 resolver 拿到的是 req.tenant_id）。"""
+
+    def __init__(self, budget: int) -> None:
+        self.budget = budget
+        self.asked: list[str] = []
+
+    async def __call__(self, tenant_id: str) -> int:
+        self.asked.append(tenant_id)
+        return self.budget
+
+
+async def test_resolver_takes_precedence_and_blocks():
+    """resolver 在场即预算事实源：静态 int 再大也不看——切表后 Settings 值退役（#13）。"""
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    resolver = StubResolver(budget=100)
+    gw, _, limiter = make_gw(
+        [p1], meter=StubMeter(spent=100), monthly_token_budget=10_000, monthly_budget_resolver=resolver
+    )
+    with pytest.raises(BudgetExceeded, match="预算 100"):
+        await collect(gw)
+    assert resolver.asked == ["t1"]  # 按请求租户查表
+    assert p1.calls == 0
+    assert limiter.asked == []  # 闸位不变：仍在租户限流之前
+
+
+async def test_resolver_relaxes_static_budget():
+    """反方向同证：租户表预算更宽 → 静态值会拒的请求被放行——事实源确已切换。"""
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw(
+        [p1], meter=StubMeter(spent=150), monthly_token_budget=100, monthly_budget_resolver=StubResolver(budget=1_000)
+    )
+    assert await collect(gw) == OK_CHUNKS
+
+
+async def test_resolver_zero_disables_gate():
+    """未知租户/未配预算 → 0 = 闸门关闭（TenantDirectory.monthly_budget 契约，与 Settings 默认 0 同语义）。"""
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw(
+        [p1], meter=StubMeter(spent=10**9), monthly_token_budget=100, monthly_budget_resolver=StubResolver(budget=0)
+    )
+    assert await collect(gw) == OK_CHUNKS
+
+
+async def test_resolver_error_fails_open():
+    """resolver 挂（tenants 表读失败）→ 与账本读挂同路：fail-open 放行（成本闸门哲学，00 §2.2）。"""
+
+    async def broken(tenant_id: str) -> int:
+        raise ConnectionError("tenants db down")
+
+    p1 = FakeProvider("p1", [OK_CHUNKS])
+    gw, _, _ = make_gw([p1], meter=StubMeter(spent=10**9), monthly_token_budget=100, monthly_budget_resolver=broken)
+    assert await collect(gw) == OK_CHUNKS

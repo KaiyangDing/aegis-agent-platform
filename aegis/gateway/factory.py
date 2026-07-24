@@ -5,6 +5,7 @@ from decimal import Decimal
 from aegis.core.config import get_settings
 from aegis.core.db import get_session_factory
 from aegis.core.redis import get_redis
+from aegis.core.tenancy import TenantDirectory
 from aegis.gateway.breaker import CircuitBreaker
 from aegis.gateway.cache import ExactCache
 from aegis.gateway.metering import MeteringRecorder
@@ -43,5 +44,6 @@ def build_gateway() -> LLMGateway:
             {m: (Decimal(str(p)), Decimal(str(c))) for m, (p, c) in s.model_prices.items()},
         ),
         monthly_token_budget=s.tenant_monthly_token_budget,
+        monthly_budget_resolver=TenantDirectory(get_session_factory()).monthly_budget,
         request_token_budget=s.request_token_budget,
     )

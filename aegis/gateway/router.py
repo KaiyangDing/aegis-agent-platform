@@ -16,7 +16,7 @@ import json
 import logging
 import random
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Literal, Protocol, get_args
@@ -166,6 +166,7 @@ class LLMGateway:
         cache: CacheLike | None = None,
         meter: MeterLike | None = None,
         monthly_token_budget: int = 0,
+        monthly_budget_resolver: Callable[[str], Awaitable[int]] | None = None,
         request_token_budget: int = 0,
         limits: GatewayLimits | None = None,
         retry_policy: RetryPolicy | None = None,
@@ -180,12 +181,23 @@ class LLMGateway:
         self._cache = cache
         self._meter = meter
         self._monthly_token_budget = monthly_token_budget
+        self._monthly_budget_resolver = monthly_budget_resolver  # M3.1③：在场即预算事实源（#13）
         self._request_token_budget = request_token_budget
         self._limits = limits or GatewayLimits()
         self._retry_policy = retry_policy or RetryPolicy()
         self._fault_rate = fault_rate
         self._fault_targets = fault_targets
         self._fault_mode = fault_mode
+
+    async def _resolve_monthly_budget(self, tenant_id: str) -> int | None:
+        """预算三态：resolver 值（切表，#13）/ 静态配置（resolver=None）/ None=读挂 fail-open 跳闸门。"""
+        if self._monthly_budget_resolver is None:
+            return self._monthly_token_budget
+        try:
+            return await self._monthly_budget_resolver(tenant_id)
+        except Exception:
+            logger.warning("租户预算读取失败，本次放行（fail-open）", exc_info=True)
+            return None
 
     async def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
         # 配置防御：parse_routes 已保证齐档，但手工构造的路由表（如测试）可能缺档——
@@ -220,18 +232,20 @@ class LLMGateway:
                     await self._safe_record(req, "cache", hit_usage)
                 return
 
-        # 租户月度预算闸门（软预算 fail-open：账本读挂了放行并告警——
-        # 成本护栏不是安全边界，为一次账本抖动拒绝所有用户是代价倒挂）
-        if self._meter is not None and self._monthly_token_budget > 0:
-            try:
-                spent = await self._meter.month_spend(req.tenant_id)
-            except Exception:
-                logger.warning("预算读取失败，本次放行（fail-open）", exc_info=True)
-            else:
-                if spent >= self._monthly_token_budget:
-                    raise BudgetExceeded(
-                        f"租户 {req.tenant_id} 本月已用 {spent} token，预算 {self._monthly_token_budget}"
-                    )
+        # 租户月度预算闸门（软预算 fail-open：账本/租户表读挂了放行并告警——
+        # 成本护栏不是安全边界，为一次读抖动拒绝所有用户是代价倒挂）。
+        # M3.1③（#13）：resolver 在场即预算事实源（读 tenants 表，60s 缓存在 TenantDirectory）；
+        # 缺席落回静态配置——resolver=None 时行为与 M2.4 完全一致（P3 不变量）
+        if self._meter is not None and (self._monthly_budget_resolver is not None or self._monthly_token_budget > 0):
+            budget = await self._resolve_monthly_budget(req.tenant_id)
+            if budget is not None and budget > 0:  # None=读挂 fail-open；≤0=该租户闸门关闭（不白查账本，#22）
+                try:
+                    spent = await self._meter.month_spend(req.tenant_id)
+                except Exception:
+                    logger.warning("预算读取失败，本次放行（fail-open）", exc_info=True)
+                else:
+                    if spent >= budget:
+                        raise BudgetExceeded(f"租户 {req.tenant_id} 本月已用 {spent} token，预算 {budget}")
 
         # 单请求预算闸门（三级预算的 L1 级，§10.1 #1）：挡超长上下文炸弹。
         # 在租户限流之前——被拒的请求不该消耗配额；估算口径 ±15%（00 §2.2）
