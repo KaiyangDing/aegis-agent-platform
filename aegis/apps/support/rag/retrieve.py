@@ -7,6 +7,10 @@
   直接精确扫描（万级全扫既正确又够快，租户规模设定 01 §5 使备选即主选合法），
   大租户 hnsw.iterative_scan=relaxed_order 迭代补扫（pgvector ≥0.8.0）。
 
+本模块不自设租户上下文：身份由边界建立（API=auth 验签、任务=内胆、脚本=main 自包），
+叶子自冒充会把 RLS 第二防线短路成第一防线的镜像——兜底价值恰在"环境身份 × 参数租户"
+交叉核验（环境 A × 参数 B 时 USING∩WHERE=空集：泄漏不发生、bug 以检索失败形态可见）。
+
 本文件是检索唯一入口（<=> 算子只许在此出现）；rerank 是模块边界（换 cross-encoder
 不动本文件）。失败语义 fail-loud：embedder/DB 异常裸抛——增强层的 fail-open 归
 槽位适配器（交付③，#42 修案 (a)），领域对象不吞错，评测与演示需要诚实的失败。
@@ -24,7 +28,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aegis.apps.support.rag.models import ChunkRecord
 from aegis.apps.support.rag.rerank import RetrievedChunk, rerank
 from aegis.core.tenancy import SessionFactory
-from aegis.core.tenant_ctx import tenant_context
 
 RETRIEVAL_SCORE_THRESHOLD = 0.35
 """综合分下限（相似度语义，不是距离）。§3.5 留白占位，交付④真语料实测校准。"""
@@ -89,24 +92,28 @@ class Retriever:
         self._count_cache: dict[str, tuple[int, float]] = {}  # tenant_id -> (count, 存入时刻)
 
     async def search(self, tenant_id: str, query: str) -> list[RetrievedChunk]:
-        """空列表 = 检索失败（无语料/全低于阈值）——调用方走兜底话术，宁可说不知道。"""
+        """空列表 = 检索失败（无语料/全低于阈值）——调用方走兜底话术，宁可说不知道。
+
+        前提：调用方已处在租户边界内（auth/任务内胆/脚本 main 建立的 ContextVar）。
+        本函数不自设上下文——理由见模块 docstring；环境缺席时 guard 注空串、
+        RLS 读到空集，安全方向失败。
+        """
         [qvec] = await self._embedder.embed([query], tenant_id=tenant_id)  # 网络慢活在事务外
-        with tenant_context(tenant_id):  # 冒充租户过 RLS（app 引擎钩子读它——D4 对偶）
-            async with self._factory() as s:
-                async with s.begin():
-                    count = await self._tenant_chunk_count(s, tenant_id)
-                    scan = _SET_EXACT_SCAN if count <= self._exact_scan_max_chunks else _SET_ITERATIVE_SCAN
-                    await s.execute(scan)  # SET LOCAL 事务级：与查询同事务才生效（§4.5 陷阱 4）
-                    rows = (
-                        await s.execute(
-                            _SEARCH_SQL,
-                            {
-                                "qvec": _vector_literal(qvec),
-                                "tid": tenant_id,
-                                "lim": self._top_k * _CANDIDATE_MULTIPLIER,
-                            },
-                        )
-                    ).all()
+        async with self._factory() as s:
+            async with s.begin():
+                count = await self._tenant_chunk_count(s, tenant_id)
+                scan = _SET_EXACT_SCAN if count <= self._exact_scan_max_chunks else _SET_ITERATIVE_SCAN
+                await s.execute(scan)  # SET LOCAL 事务级：与查询同事务才生效（§4.5 陷阱 4）
+                rows = (
+                    await s.execute(
+                        _SEARCH_SQL,
+                        {
+                            "qvec": _vector_literal(qvec),
+                            "tid": tenant_id,
+                            "lim": self._top_k * _CANDIDATE_MULTIPLIER,
+                        },
+                    )
+                ).all()
         hits = [
             RetrievedChunk(
                 chunk_id=row.id,
