@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Sequence
 from typing import Protocol
@@ -28,6 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aegis.apps.support.rag.models import ChunkRecord
 from aegis.apps.support.rag.rerank import RetrievedChunk, rerank
 from aegis.core.tenancy import SessionFactory
+from aegis.runtime.context import ScoredSnippet
+from aegis.runtime.guardrails import wrap_untrusted
+
+logger = logging.getLogger(__name__)
 
 RETRIEVAL_SCORE_THRESHOLD = 0.35
 """综合分下限（相似度语义，不是距离）。§3.5 留白占位，交付④真语料实测校准。"""
@@ -140,3 +145,28 @@ class Retriever:
         ).scalar_one()
         self._count_cache[tenant_id] = (count, now)
         return count
+
+
+class RetrievalProvider:
+    """ContextBuilder 检索槽位适配器（#7 接电、#42 修案 (a) 落地处；M3.8 装配时注入）。
+
+    三职责各有归属：形状适配（RetrievedChunk→ScoredSnippet，keyword-only 契约
+    context.py:70；不裁剪——预算装填归 builder._pack_snippets）；不可信包裹
+    （wrap_untrusted source="retrieval"——X4：事件与库存原文，prompt 注入面才包裹，
+    包裹后文本进预算尺=计的是真实负载）；fail-open（C34：检索是增强层，provider
+    抖动降级为"本轮无检索"+留痕续跑——#42 裸穿 build 杀 run 的修复现场）。
+    域对象 Retriever 保持 fail-loud：吞错只发生在这道 L2 边界，评测/演示直调
+    Retriever 仍看得到诚实异常。
+    """
+
+    def __init__(self, retriever: Retriever) -> None:
+        self._retriever = retriever
+
+    async def search(self, *, tenant_id: str, query: str) -> Sequence[ScoredSnippet]:
+        try:
+            hits = await self._retriever.search(tenant_id, query)
+        except Exception:
+            # C34 同款结构化留痕（不记 query 原文——源头打码纪律）；exc_info 供排障
+            logger.warning("检索层失败，fail-open 留空续跑（C34/#42）：tenant=%s", tenant_id, exc_info=True)
+            return ()
+        return tuple(ScoredSnippet(text=wrap_untrusted(h.text, source="retrieval"), score=h.score) for h in hits)

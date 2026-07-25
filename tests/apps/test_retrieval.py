@@ -1,4 +1,4 @@
-"""M3.5 交付②：Retriever 六步算法（真 PG 集成；假 embedder 注入固定向量）。
+"""M3.5 交付②③：Retriever 六步算法 + 槽位适配器（真 PG 集成；假 embedder 注入固定向量）。
 
 租户/文档 id 全部随机重绑定（偏差(28) 教训：库内演示残留不许进断言视野）。
 向量用单位轴构造——余弦相似度可心算（同轴=1、正交=0、混轴=分量值）。
@@ -9,6 +9,7 @@ SET 语句断言用连接级 before_cursor_execute 捕获（同实证钉过可�
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -17,8 +18,11 @@ import pytest
 from sqlalchemy import event
 
 from aegis.apps.support.rag.models import EMBEDDING_DIMS, ChunkRecord
-from aegis.apps.support.rag.retrieve import Retriever
+from aegis.apps.support.rag.retrieve import RetrievalProvider, Retriever
 from aegis.core.tenancy import SessionFactory
+from aegis.runtime.context import _RETRIEVAL_HEADER, ContextBuilder, RetrievalProviderLike, ScoredSnippet
+from aegis.runtime.guardrails import wrap_untrusted
+from aegis.runtime.spec import ContextConfig
 
 _SUF = uuid.uuid4().hex[:8]
 TEN_A = f"ret-a-{_SUF}"
@@ -228,3 +232,104 @@ async def test_row_mapping_and_meta_roundtrip(db_session_factory) -> None:
     assert hit.meta == {"priority": "high"}
     assert hit.similarity == pytest.approx(0.6)  # float32 噪音由 approx 消化
     assert hit.score == pytest.approx(0.7 * 0.6 + 0.3 * 1.0)  # 覆盖率 {青梧,梧路} 全中=1.0
+
+
+# ---- 交付③：槽位适配器 RetrievalProvider（#7 接电 + #42 修案 (a)）----
+
+
+class _BoomEmbedder:
+    """恒炸替身：检验 fail-open 边界（异常发自 embed，经 Retriever 裸穿到适配器）。"""
+
+    async def embed(self, texts: Sequence[str], *, tenant_id: str) -> list[list[float]]:
+        raise RuntimeError("embedding 通道抖动")
+
+
+class _NoEventsSink:
+    """EventSink 形状哨兵：summarize=None 的 build 路径不许写事件——append 即炸。"""
+
+    session_id = f"ctx-{_SUF}"
+    run_id = f"run-{_SUF}"
+
+    async def append(self, event_type, payload):
+        raise AssertionError("检索层路径不应写事件")
+
+
+async def test_provider_wraps_and_adapts_shape(db_session_factory) -> None:
+    """形状适配 + 不可信包裹：出线是 ScoredSnippet、text 经 wrap_untrusted(source=retrieval)。"""
+    q = "青梧路门店"
+    emb = _FixedEmbedder({q: _vec((0, 1.0))})
+    await _add_chunk(
+        db_session_factory, tenant_id=TEN_A, seq=0, text_="青梧路 199 号门店指南", embedding=_vec((0, 1.0))
+    )
+    # 协议一致性由这行注解交给 mypy 钉死（Protocol 非 runtime_checkable，静态检查即契约）
+    provider: RetrievalProviderLike = RetrievalProvider(Retriever(db_session_factory, emb))
+    (snip,) = await provider.search(tenant_id=TEN_A, query=q)
+    assert isinstance(snip, ScoredSnippet)
+    assert snip.text == wrap_untrusted("青梧路 199 号门店指南", source="retrieval")  # 单一事实源比对，不硬编码格式
+    assert snip.score > 0
+
+
+async def test_provider_fail_open_returns_empty_and_logs(db_session_factory, caplog) -> None:
+    """#42 修案 (a)：provider 异常不再裸穿——返空 fail-open + warning 留痕（C34 口径）。"""
+    provider = RetrievalProvider(Retriever(db_session_factory, _BoomEmbedder()))
+    with caplog.at_level(logging.WARNING):
+        out = await provider.search(tenant_id=TEN_A, query="任意")
+    assert out == ()
+    assert any("fail-open" in r.message for r in caplog.records)
+
+
+async def test_provider_preserves_order_and_never_trims(db_session_factory) -> None:
+    """纯形状适配：保 rerank 序、整条透传不裁剪——预算装填归 builder._pack_snippets（实况块 #4）。"""
+    q = "查询"
+    emb = _FixedEmbedder({q: _vec((0, 1.0))})
+    long_text = "长" * 500  # ~500 token：适配器若自作主张裁剪必现形
+    await _add_chunk(
+        db_session_factory,
+        tenant_id=TEN_A,
+        seq=0,
+        text_=long_text,
+        embedding=_vec((0, 0.9), (1, (1 - 0.81) ** 0.5)),
+    )
+    await _add_chunk(db_session_factory, tenant_id=TEN_A, seq=1, text_="短资料", embedding=_vec((0, 0.8), (2, 0.6)))
+    snips = await RetrievalProvider(Retriever(db_session_factory, emb)).search(tenant_id=TEN_A, query=q)
+    assert len(snips) == 2
+    assert [s.score for s in snips] == sorted((s.score for s in snips), reverse=True)
+    assert long_text in snips[0].text  # 整条在场，只是被包裹
+
+
+async def test_provider_plugs_into_context_builder(db_session_factory) -> None:
+    """#7 接电证明：ContextBuilder 检索槽消费本适配器——检索层消息带标头与包裹入 prompt。"""
+    q = "青梧路门店"
+    emb = _FixedEmbedder({q: _vec((0, 1.0))})
+    await _add_chunk(
+        db_session_factory, tenant_id=TEN_A, seq=0, text_="青梧路 199 号门店指南", embedding=_vec((0, 1.0))
+    )
+    builder = ContextBuilder(
+        db_session_factory,
+        _NoEventsSink(),
+        config=ContextConfig(),
+        tenant_id=TEN_A,
+        user_id=f"u-{_SUF}",
+        retrieval=RetrievalProvider(Retriever(db_session_factory, emb)),
+    )
+    messages = await builder.build(system_prompt="你是客服助手", user_input=q)
+    (layer,) = [m for m in messages if m.content.startswith(_RETRIEVAL_HEADER)]
+    assert layer.role == "system"
+    assert "source=retrieval]" in layer.content
+    assert "青梧路 199 号门店指南" in layer.content
+
+
+async def test_provider_fail_open_keeps_build_alive(db_session_factory) -> None:
+    """#42 回归钉子：检索抖动时 build 照常出 prompt（无检索层、user 原文在场）——run 不死。"""
+    builder = ContextBuilder(
+        db_session_factory,
+        _NoEventsSink(),
+        config=ContextConfig(),
+        tenant_id=TEN_A,
+        user_id=f"u-{_SUF}",
+        retrieval=RetrievalProvider(Retriever(db_session_factory, _BoomEmbedder())),
+    )
+    messages = await builder.build(system_prompt="你是客服助手", user_input="任意问题")
+    assert not [m for m in messages if m.content.startswith(_RETRIEVAL_HEADER)]
+    assert messages[-1].role == "user"
+    assert messages[-1].content == "任意问题"
