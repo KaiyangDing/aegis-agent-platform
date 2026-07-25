@@ -16,7 +16,7 @@ from aegis.core.config import get_settings
 celery_app = Celery(
     "aegis",
     broker=get_settings().redis_url,  # ADR-005 角色 4：Celery broker
-    include=["aegis.workers.reaper"],  # 显式点名任务模块，不用 autodiscover（可 grep、可审计）
+    include=["aegis.workers.ingest", "aegis.workers.reaper"],  # 显式点名任务模块，不用 autodiscover（可 grep、可审计）
 )
 celery_app.conf.update(
     task_ignore_result=True,  # 无 result backend（3.2#9）：结果进日志与事件流，少一个 Redis 键面

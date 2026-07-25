@@ -45,6 +45,7 @@ class DocumentRecord(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # 应用侧 uuid4().hex（API 落单时生成）
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)  # RLS 策略列
     source: Mapped[str] = mapped_column(String(256))  # 文件名/来源标识（v1 纯文本上传）
+    text: Mapped[str] = mapped_column(Text, server_default="")  # 原文：任务从库读（wire 只带 id——偏差(23)）
     status: Mapped[str] = mapped_column(String(16))  # IngestStatus.value
     error: Mapped[str | None] = mapped_column(Text, nullable=True)  # FAILED 时的死因文本
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)  # DONE 时回填；ORM 默认（裸 INSERT 不享受）
