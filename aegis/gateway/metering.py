@@ -123,3 +123,35 @@ class MeteringRecorder:
         )
         async with self._sf() as session:
             return int((await session.execute(stmt)).scalar_one())
+
+    async def record_embedding(
+        self,
+        *,
+        tenant_id: str,
+        request_id: str,
+        model: str,
+        prompt_tokens: int,
+        session_id: str | None = None,
+    ) -> None:
+        """embedding 通道的一行账（M3.4 D5）。tier="embedding" 是自由字符串——
+        Tier 是 chat 档位契约（schema.py），embedding 不入档位路由，绝不扩枚举；
+        completion_tokens=0：无输出侧计费；cached=False：本通道无缓存语义。
+        月度预算口径（拍板 F）：cached=False 使本行被 month_spend 计入租户月度
+        token 预算——预算管的是真实花销，embedding 是真实花销。"""
+        cost = compute_cost(model, prompt_tokens, 0, cached=False, prices=self._prices)
+        async with self._sf() as session:
+            async with session.begin():
+                session.add(
+                    UsageRecord(
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        tier="embedding",
+                        provider="bailian",
+                        model=model,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=0,
+                        cached=False,
+                        cost=cost,
+                    )
+                )

@@ -54,6 +54,7 @@ class Settings(BaseSettings):
         "qwen-plus": [0.0008, 0.002],  # 演示值——同上
         "qwen3.7-max": [0.0024, 0.0096],  # 演示值——同上
         "qwen3.7-plus": [0.0008, 0.002],  # 演示值——已退出路由，保留供历史账本行核对
+        "text-embedding-v4": [0.0005, 0.0],  # 演示值——embedding 输入单价，无输出侧（M3.4 D5）
     }
     tenant_monthly_token_budget: int = 0  # 租户月度 token 预算；0=关闭，超额抛 BudgetExceeded
     request_token_budget: int = 0  # 单请求 token 预算（估算口径）；0=关闭（§10.1 #1，三级预算 L1 级）
