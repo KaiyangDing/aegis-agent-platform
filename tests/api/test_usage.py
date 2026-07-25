@@ -3,10 +3,12 @@
 种子经 ORM 写 usage_ledger（SAVEPOINT 夹具，零污染）；端点经 app.state.session_factory
 注入同一夹具工厂，查询与种子同一事务视界。金额在 JSON 里是精确小数字符串
 （pydantic v2 对 Decimal 的缺省序列化——"钱不过 float"口径延伸到线上表示），断言用 Decimal。
+零污染只管"测试不写脏库"，反向（库内已有演示残留）靠种子租户随机化隔离——见下方常量注释。
 """
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 
 import httpx
@@ -22,23 +24,31 @@ from aegis.gateway.metering import UsageRecord
 
 SECRET = "usage-test-secret-0123456789abcdef"  # ≥32B（RFC 7518 下限）
 
+# 种子租户 id 每次运行随机重绑定（M2.11 cassette 重绑定同款教训）：demo 与 M3.4
+# 真实链路验收写的是固定 id tenant-a——库内残留（28 token 的 embedding 行）曾使
+# 本文件两条全局相等断言本机红 CI 绿（2026-07-25 实录）；随机 id 让断言保持精确
+# 相等而不依赖库面干净（M2.10：全局相等断言天生脆，要么过滤要么隔离）。
+_SUFFIX = uuid.uuid4().hex[:8]
+TENANT_A = f"ten-a-{_SUFFIX}"
+TENANT_B = f"ten-b-{_SUFFIX}"
 
-def _token(role: Role, uid: str, tid: str = "tenant-a") -> str:
+
+def _token(role: Role, uid: str, tid: str = TENANT_A) -> str:
     return issue_token(user_id=uid, tenant_id=tid, role=role, ttl_s=3600, secret=SECRET)
 
 
-def _bearer(role: Role, uid: str, tid: str = "tenant-a") -> dict[str, str]:
+def _bearer(role: Role, uid: str, tid: str = TENANT_A) -> dict[str, str]:
     return {"Authorization": f"Bearer {_token(role, uid, tid)}"}
 
 
 async def _seed_usage(factory) -> None:
-    """tenant-a 两行（m-alpha 真调用 + m-beta 缓存命中零成本）、tenant-b 一行。"""
+    """TENANT_A 两行（m-alpha 真调用 + m-beta 缓存命中零成本）、TENANT_B 一行。"""
     async with factory() as s:
         async with s.begin():
             s.add(
                 UsageRecord(
                     request_id="r-a1",
-                    tenant_id="tenant-a",
+                    tenant_id=TENANT_A,
                     session_id="s-a1",
                     tier="standard",
                     provider="bailian",
@@ -52,7 +62,7 @@ async def _seed_usage(factory) -> None:
             s.add(
                 UsageRecord(
                     request_id="r-a2",
-                    tenant_id="tenant-a",
+                    tenant_id=TENANT_A,
                     session_id="s-a1",
                     tier="fast",
                     provider="cache",
@@ -66,7 +76,7 @@ async def _seed_usage(factory) -> None:
             s.add(
                 UsageRecord(
                     request_id="r-b1",
-                    tenant_id="tenant-b",
+                    tenant_id=TENANT_B,
                     session_id="s-b1",
                     tier="standard",
                     provider="bailian",
@@ -104,24 +114,24 @@ async def test_operator_sees_only_own_tenant(client) -> None:
     resp = await client.get("/v1/usage", headers=_bearer(Role.OPERATOR, "op-a1"))
     assert resp.status_code == 200
     body = resp.json()
-    assert body["tenant_id"] == "tenant-a"
+    assert body["tenant_id"] == TENANT_A
     assert {r["request_id"] for r in body["detail"]} == {"r-a1", "r-a2"}  # r-b1 不可见
 
 
 async def test_operator_foreign_tenant_param_403(client) -> None:
     """强制过滤的显式面：operator 点名他租 → 403 而非静默改写（审计口径清晰）。"""
-    resp = await client.get("/v1/usage?tenant_id=tenant-b", headers=_bearer(Role.OPERATOR, "op-a1"))
+    resp = await client.get(f"/v1/usage?tenant_id={TENANT_B}", headers=_bearer(Role.OPERATOR, "op-a1"))
     assert resp.status_code == 403
 
 
 async def test_admin_defaults_own_and_queries_other(client) -> None:
     """admin 平台级：缺省看自己 token 的租户，点名可查任意租户（矩阵 ✅ 无限定）。"""
     own = (await client.get("/v1/usage", headers=_bearer(Role.ADMIN, "admin-a1"))).json()
-    assert own["tenant_id"] == "tenant-a"
-    other = await client.get("/v1/usage?tenant_id=tenant-b", headers=_bearer(Role.ADMIN, "admin-a1"))
+    assert own["tenant_id"] == TENANT_A
+    other = await client.get(f"/v1/usage?tenant_id={TENANT_B}", headers=_bearer(Role.ADMIN, "admin-a1"))
     assert other.status_code == 200
     body = other.json()
-    assert body["tenant_id"] == "tenant-b"
+    assert body["tenant_id"] == TENANT_B
     assert [r["request_id"] for r in body["detail"]] == ["r-b1"]
 
 
@@ -162,8 +172,8 @@ async def test_usage_queries_run_in_target_tenant_context(db_session_factory) ->
     app = create_app(Settings(jwt_secret=SecretStr(SECRET)), session_factory=recording)
     await _seed_usage(db_session_factory)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.get("/v1/usage?tenant_id=tenant-b", headers=_bearer(Role.ADMIN, "admin-a1"))
+        resp = await c.get(f"/v1/usage?tenant_id={TENANT_B}", headers=_bearer(Role.ADMIN, "admin-a1"))
     assert resp.status_code == 200
     # 端点开一个会话跑四条查询（factory 恰调一次）；开会话时刻已戴目标租户的牌=
-    # tenant_context(target) 覆盖了认证层的 tenant-a（首版断言误设四次开会话——测试稿缺陷）
-    assert recording.seen == ["tenant-b"]
+    # tenant_context(target) 覆盖了认证层的 TENANT_A（首版断言误设四次开会话——测试稿缺陷）
+    assert recording.seen == [TENANT_B]
