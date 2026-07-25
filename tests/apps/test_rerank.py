@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import pytest
+
 from aegis.apps.support.rag.rerank import RetrievedChunk, keyword_coverage, rerank
 
 

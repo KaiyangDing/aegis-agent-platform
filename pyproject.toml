@@ -42,6 +42,11 @@ target-version = "py313"
 # E/F=基础错误  I=import 排序  UP=过时写法升级  B=常见 bug 模式
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.isort]
+# 钉死 first-party：缺省靠"模块文件在不在盘"推断——测试先于生产模块交付时
+# aegis 被误判三方（I001 假阳性，M3.4 偏差(22)），且结果进 .ruff_cache 本机 CI 分叉
+known-first-party = ["aegis"]
+
 [tool.mypy]
 python_version = "3.13"
 check_untyped_defs = true
