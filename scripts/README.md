@@ -35,6 +35,7 @@
 | `experiment_fault_injection.py` | 30% 注入 ×1000 韧性实测 + 熔断演示（M1 毕业实验） | M1 | 否（打桩） | PG/Redis |
 | `loadtest_ratelimit.py` | 限流精度压测（时序断言不进 CI，以本脚本报告为准） | M1 | 否 | Redis（db9） |
 | `record_long_dialog.py` | 40 轮长对话真实录制（M2 真实调用例外①）；六道自检先于落盘 | M2.11 | **是**（预算写死） | 全套 + `.env` key |
+| `calibrate_retrieval_threshold.py` | 检索阈值真实语料校准（§3.5 留白定值；首测 0.35 维持、分离窗 [0.31,0.45]；M3.11 语料扩容后复跑复核。新前缀族 calibrate_=数值留白定值工种） | M3.5④ | **是**（<¥0.001，查询清单钉死上限） | PG + 语料已摄取 + `.env` key |
 
 ## 对账与调试
 
