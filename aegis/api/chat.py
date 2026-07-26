@@ -1,11 +1,10 @@
-"""POST /v1/chat 入站前半（M3.2）：认证→角色→限流→归属→准入→驱动 run（02 §2 ①–④）。
+"""POST /v1/chat（M3.2 入站三件 + M3.8② 收敛调用 ChatService）。
 
-占位形态：run 事件全量收集后以 JSON 摘要返回（SSE 化归 M3.10）；AgentSpec 用模块级
-占位（无工具无检索，M3.8 按租户装配替换）。user_message 由 loop 写——本层只传原文
-进 run，绝不双写（M3.0 实况 #6/U8 定案）。
-状态码分工不变量：401 认证 / 403 角色 / 404 归属（不泄露存在性）/ 409 互斥与状态冲突 /
-422 载荷 / 429 限流——绝不互相冒充。
-取消是安全动作：只认显式 cancel_pending_approval 字段，不做自然语言猜测（plans §4.2）。
+准入链归端点（401 认证/403 角色/404 归属/409 冲突/422 载荷/429 限流——分工
+不变量，绝不互相冒充）；意图分诊→分支→run 归 ChatService（apps 层）。
+user_message 归属：主分支由 loop 写、直答分支由 service 写——端点永不写事件。
+响应仍为 JSON 摘要（SSE 化归 M3.10，届时帧直接透传）。
+取消是安全动作：只认显式 cancel_pending_approval 字段，不做自然语言猜测。
 """
 
 from __future__ import annotations
@@ -19,11 +18,10 @@ from sqlalchemy.exc import IntegrityError
 
 from aegis.api.auth import Principal, require_roles
 from aegis.api.ratelimit import rate_limited
+from aegis.apps.support.service import ChatFrame, ChatService
 from aegis.core.locks import SessionLockHeld
 from aegis.core.tenancy import Role, SessionFactory
-from aegis.runtime.events import AgentEvent, EventType
 from aegis.runtime.runtime import AgentRuntime
-from aegis.runtime.spec import AgentSpec
 from aegis.runtime.store import (
     ApprovalRecord,
     ApprovalStatus,
@@ -36,14 +34,6 @@ from aegis.runtime.store import (
 )
 
 router = APIRouter()
-
-PLACEHOLDER_SPEC = AgentSpec(
-    system_prompt=(
-        "你是云杉电商的客服助手（M3.2 占位形态：无工具、无检索，仅直接回答；"
-        "M3.8 起按租户装配替换）。请用中文简洁回答用户问题。"
-    )
-)
-"""M3.6 意图路由与 M3.8 build_agent_spec 落地前的临时注入面——create_app 可整体换掉。"""
 
 _ADMITTED = rate_limited(require_roles(Role.USER, Role.ADMIN))
 """准入链 401→403→429：矩阵 POST /v1/chat 的 operator 列为 —（02 §7.1），坐席不替用户发消息。"""
@@ -85,8 +75,8 @@ async def _find_pending(factory: SessionFactory, session_id: str) -> ApprovalRec
         ).scalar_one_or_none()  # 单点挂起不变量：一会话至多一张 pending 单（loop._run_tools）
 
 
-async def _drain(events_agen: Any) -> list[AgentEvent]:
-    """收集 run/resume 事件并把并发信号映射为 409。
+async def _collect(agen: Any) -> list[Any]:
+    """收集帧/事件流并把并发信号映射为 409（M3.2 原样，泛化到帧）。
 
     except 阶梯顺序即语义：SessionLockHeld（锁/租约被占）→ 409；事实源三类
     （EventStoreUnavailable/EventWriteFenced/LeaseLost 均为 RuntimeError 子类）
@@ -94,7 +84,7 @@ async def _drain(events_agen: Any) -> list[AgentEvent]:
     与 run 之间的残余竞态窗）→ 409。顺序错一行就会把围栏自毁吞成客服话术。
     """
     try:
-        return [e async for e in events_agen]
+        return [x async for x in agen]
     except SessionLockHeld as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="上一条消息处理中") from e
     except (EventStoreUnavailable, EventWriteFenced, LeaseLost):
@@ -103,25 +93,25 @@ async def _drain(events_agen: Any) -> list[AgentEvent]:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="会话状态冲突，请稍后重试") from e
 
 
-def _summary(session_id: str, events: list[AgentEvent]) -> dict[str, Any]:
-    """占位 JSON 摘要（M3.10 换 SSE 帧）：有终止事件 → done；干净挂起（D2 哨兵）→ awaiting_approval。"""
-    reply = next((e.payload["content"] for e in reversed(events) if e.type is EventType.ASSISTANT_MESSAGE), None)
-    term = next((e.payload for e in reversed(events) if e.type is EventType.LOOP_TERMINATED), None)
-    if term is None:  # 无 loop_terminated = 干净挂起，本轮必有 approval_requested
-        req = next(e.payload for e in reversed(events) if e.type is EventType.APPROVAL_REQUESTED)
+def _summary(session_id: str, frames: list[ChatFrame]) -> dict[str, Any]:
+    """占位 JSON 摘要（M3.10 换 SSE 帧）：有 done 帧 → done；干净挂起 → awaiting_approval。"""
+    done = next((f.data for f in reversed(frames) if f.kind == "done"), None)
+    if done is None:  # 无 done = 干净挂起，本轮必有 approval_pending 帧
+        pend = next(f.data for f in reversed(frames) if f.kind == "approval_pending")
         return {
             "session_id": session_id,
             "status": "awaiting_approval",
-            "approval_id": req["approval_id"],
-            "tool_name": req["tool_name"],
-            "expires_at": req["expires_at"],
+            "approval_id": pend["approval_id"],
+            "tool_name": pend["tool_name"],
+            "expires_at": pend["expires_at"],
         }
+    reply = next((f.data["text"] for f in reversed(frames) if f.kind == "token"), None)
     return {
         "session_id": session_id,
         "status": "done",
-        "reason": term["reason"],
+        "reason": done["reason"],
         "reply": reply,
-        "events": len(events),
+        "events": done.get("events", 0),
     }
 
 
@@ -133,7 +123,10 @@ async def post_chat(
 ) -> dict[str, Any]:
     factory: SessionFactory = request.app.state.session_factory
     runtime: AgentRuntime = request.app.state.runtime
-    spec: AgentSpec = request.app.state.agent_spec
+    service: ChatService | None = request.app.state.chat_service
+    if service is None:
+        # 组装不完整（注入 runtime 却没给 gateway/chat_service）：配置 bug 响亮失败，不降级
+        raise RuntimeError("create_app 组装不完整：注入 runtime 时须同时注入 gateway 或 chat_service")
     run_state = await _ensure_session(factory, body.session_id, principal)
 
     if body.cancel_pending_approval:
@@ -144,7 +137,8 @@ async def post_chat(
         if not await ApprovalStore(factory).cancel(pending.id):
             # 与坐席 decide / reaper 到期赛跑输了：绝不覆盖赢家（C11），按当前实况回
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="审批单已失效或已处理")
-        events = await _drain(runtime.resume(spec, body.session_id, approval_id=pending.id))
+        spec = await service.build_spec(principal.tenant_id)  # 按租户装配（PLACEHOLDER_SPEC 已退役）
+        events = await _collect(runtime.resume(spec, body.session_id, approval_id=pending.id))
         return {"session_id": body.session_id, "status": "cancelled", "approval_id": pending.id, "events": len(events)}
 
     if run_state == RunState.AWAITING_APPROVAL.value:
@@ -157,6 +151,13 @@ async def post_chat(
             "approval_id": pending.id if pending else None,
         }
 
-    # 正常路：驱动一次 run。user_message 由 loop 写入首事件——此处只传原文（实况 #6）
-    events = await _drain(runtime.run(spec, body.session_id, body.message))
-    return _summary(body.session_id, events)
+    # 正常路：交给编排层（intent→分支→run）。user_message 归属见模块 docstring
+    frames = await _collect(
+        service.handle(
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            session_id=body.session_id,
+            message=body.message,
+        )
+    )
+    return _summary(body.session_id, frames)

@@ -24,3 +24,6 @@ SYSTEM_PROMPT_TEMPLATE = (
 FALLBACK_LOOP_LIMIT = "这个问题比较复杂，我先为您转接人工客服跟进（已生成工单），请留意后续通知。"
 """循环达上限/会话预算耗尽的兜底话术（§4.8 兜底路径②）：service 层在
 loop_terminated.reason ∈ {max_iterations, token_budget_exceeded} 时补发并建 handoff 工单。"""
+
+HANDOFF_REPLY_TEMPLATE = "已为您转接人工客服，工单号 {ticket_id}，会有专员尽快跟进；您也可以继续补充说明。"
+"""HANDOFF 直通分支（用户点名转人工）的答复话术（M3.8② service 层消费）。"""

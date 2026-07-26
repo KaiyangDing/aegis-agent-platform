@@ -23,7 +23,7 @@ from sqlalchemy import select
 from aegis.core.config import Settings, get_settings
 from aegis.core.locks import SessionLock, SessionLockHeld, hold_session_lock
 from aegis.gateway.schema import LLMChunk, LLMRequest, Message, TextDelta, ToolCall
-from aegis.runtime.context import ContextBuilder
+from aegis.runtime.context import ContextBuilder, RetrievalProviderLike
 from aegis.runtime.events import AgentEvent, EventType
 from aegis.runtime.executor import ToolExecutor
 from aegis.runtime.guardrails import Classifier, Guardrails, build_classifier, wrap_untrusted
@@ -213,10 +213,14 @@ class AgentRuntime:
         lock: SessionLock | None = None,
         precheck: PrecheckHook | None = None,
         settings: Settings | None = None,
+        retrieval: RetrievalProviderLike | None = None,
     ) -> None:
         self._gateway = gateway
         self._session_factory = session_factory
         self._cancel_event = cancel_event
+        # M3.8 受控缝（拍板Ⅱ，additive 默认 None=原行为）：#7 检索槽位的生产注入通路——
+        # ContextBuilder 的缝（context.py:138）自 M2.5 就在，这里只是把它抬到门面
+        self._retrieval = retrieval
         self._run_id_factory = run_id_factory or (lambda: uuid4().hex)
         self._lock = lock  # None=无锁直通；M3.2 必须显式传 build_session_lock()
         self._precheck = precheck
@@ -296,6 +300,7 @@ class AgentRuntime:
             config=spec.context_config,
             tenant_id=tenant_id,
             user_id=user_id,
+            retrieval=self._retrieval,
             summarize=_make_summarizer(scoped_view(self._gateway, "summary"), tenant_id, session_id),
         )
         classify: Classifier | None = None

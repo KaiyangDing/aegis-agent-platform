@@ -61,12 +61,16 @@ class _HeldLock:
 
 
 def _make_app(factory, *, lock=None, limiter=None):
-    runtime = AgentRuntime(_EchoGateway(), factory, lock=lock)
+    # M3.8②：注入 runtime 时须同给 gateway（ChatService 的分类通道）；echo 输出不在
+    # 意图词表 → 恒落 AGENT 主分支，本文件全部断言走 run 路径语义不变
+    gw = _EchoGateway()
+    runtime = AgentRuntime(gw, factory, lock=lock)
     return create_app(
         Settings(jwt_secret=SecretStr(SECRET)),
         session_factory=factory,
         runtime=runtime,
         limiter=limiter or _Limiter(),
+        gateway=gw,
     )
 
 
