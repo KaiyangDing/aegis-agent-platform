@@ -58,6 +58,13 @@ class _RaisingGateway:
         return _stream()
 
 
+def test_prompt_excludes_context_dependent_followups() -> None:
+    """M3.6 后置修订⑵（M3.8① 兑现）：faq 自足限定与跟进问排除句在 prompt 内。
+    承重墙是 service 层守卫（M3.8②），这两句是统计优化；片段钉住防 M3.11 录制前被误删。"""
+    assert "仅当消息不依赖上文即可完整理解" in INTENT_PROMPT
+    assert "跟进追问" in INTENT_PROMPT
+
+
 # ---- classify：词表映射与宽容解析 ----
 
 
