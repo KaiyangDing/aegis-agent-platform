@@ -28,6 +28,7 @@
 | `demo_stop_pg_midrun.py` | 停 PG 半途实录：退避耗尽明确终止 + write-ahead 核验 | M2.12 | 否 | PG（中途手动停） |
 | `experiment_kill9_recovery.py` | kill -9 → reaper 认领 → 续跑，四断言凭证；结束自清理演示行 | M2.10 | 否 | PG/Redis |
 | `demo_tools_acceptance.py` | 工具五件真实链路三幕：Agent 查单退款 / 双击去重(#6) / 对抗③统一话术；演示订单 upsert 自带+自清理 | M3.7④ | **是**（<¥0.01，单次 Agent run） | PG/Redis + 迁移 + 种子 + `.env` key |
+| `demo_chat_acceptance.py` | 完整客服链路三幕（生产装配原件 create_app）：租户 A 查单退款直执 / **FAQ 守卫实证**（首问直答·跟进问进主 Agent）/ 租户工具面白名单 | M3.8③ | **是**（<¥0.02，≈5 次调用） | PG/Redis + 迁移 + **M3.8③ 版种子** + `.env` key |
 
 ## 实验与压测（数字凭证的产地）
 

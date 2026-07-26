@@ -17,18 +17,31 @@ from aegis.core.tenancy import Role, TenantRecord, UserRecord
 
 # 01 §5 两租户设定；approval_threshold=200 是租户 A 的配置项不是平台常量。
 # token_budget_monthly=2_000_000：M3 开发调试走真实调用的月度兜底（plans/m3-detailed §3.1）。
-# tenant-b 的 coupon_threshold 等键随 M3.7/M3.11 定值后补。
+# tools/faq 两键随 M3.8③ 前移（装配器与 FAQ 直答的验收依赖）；
+# coupon_threshold 与订单/语料种子仍归 M3.11（缺省 0=任意正面额挂审批，fail-closed）。
 TENANTS: list[dict[str, Any]] = [
     {
         "id": "tenant-a",
         "name": "云杉数码商城",
-        "config": {"approval_threshold": 200},
+        "config": {
+            "approval_threshold": 200,
+            "tools": ["order_query", "logistics_query", "refund_apply", "ticket_create"],
+            "faq": (
+                "云杉数码商城常见问题：营业时间 9:00-18:00（周一至周日）；"
+                "客服热线 400-800-1234；支持 7 天无理由退货（详情请查询退货政策）。"
+            ),
+        },
         "token_budget_monthly": 2_000_000,
     },
     {
         "id": "tenant-b",
         "name": "云杉生鲜超市",
-        "config": {},
+        "config": {
+            "tools": ["order_query", "coupon_grant"],
+            "faq": (
+                "云杉生鲜超市常见问题：配送时间每日 8:00-22:00；客服热线 400-800-5678；生鲜商品损坏可申请优惠券补偿。"
+            ),
+        },
         "token_budget_monthly": 2_000_000,
     },
 ]
