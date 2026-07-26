@@ -1,0 +1,26 @@
+"""mock 系统的进程内通路（M3.7 交付②）：ASGITransport 懒单例。
+
+拍板Ⅱ：mock 绝不挂载主 app——本客户端是唯一入口。global 手动单例（资源单例
+惯例，00 §2.2 数据访问行）；懒创建=首个调用方所在 event loop 即宿主（API 进程
+单 loop 形态）。测试不要用本单例：每测试自建 create_mock_api(...)+AsyncClient
+（跨测试 event loop 复用单例会炸——get_redis/get_engine 同款教训，M2.9）。
+"""
+
+from __future__ import annotations
+
+import httpx
+
+from aegis.apps.support.mock_backend.app import create_mock_api
+
+_client: httpx.AsyncClient | None = None
+
+
+def mock_client() -> httpx.AsyncClient:
+    """进程级懒单例：首次调用时组装 mock 子应用与 ASGI 通路（组装在边缘）。"""
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_mock_api()),
+            base_url="http://mock-backend",
+        )
+    return _client

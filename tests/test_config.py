@@ -52,6 +52,14 @@ def test_prod_forbids_fault_injection():
         make_settings(app_env="prod", fault_injection_rate=0.3)
 
 
+def test_prod_forbids_mock_injection():
+    # M3.7②：mock 注入开关与 fault_injection 同哲学——演示件的注入绝不带上生产
+    with pytest.raises(ValidationError):
+        make_settings(app_env="prod", mock_error_rate=0.5)
+    with pytest.raises(ValidationError):
+        make_settings(app_env="prod", mock_latency_ms=100)
+
+
 def test_staging_and_dev_allow_fault_injection():
     s = make_settings(app_env="dev", fault_injection_rate=0.3)
     assert s.fault_injection_rate == 0.3

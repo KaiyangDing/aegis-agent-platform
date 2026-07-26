@@ -82,12 +82,23 @@ class Settings(BaseSettings):
     # 应用运行时角色（无 BYPASSRLS）；database_url 留维护面与 alembic
     database_url_app: str = "postgresql+asyncpg://aegis_app:aegis_app@localhost:5432/aegis"
 
+    # —— 模拟业务系统注入（M3.7）——
+    mock_latency_ms: int = Field(default=0, ge=0)  # mock 端点人为延迟；演示"写超时→X1 结果不明"剧本用
+    mock_error_rate: float = Field(default=0.0, ge=0.0, le=1.0)  # mock 概率 503（0=关闭）
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
         # 与 parse_routes 同一哲学：配置错误在启动时炸，不在凌晨的流量里炸（审计加固 B）
         if self.app_env == "prod" and self.fault_injection_rate > 0:
             raise ValueError("prod 环境禁止开启故障注入（fault_injection_rate 必须为 0）")
+        return self
+
+    @model_validator(mode="after")
+    def _no_mock_injection_in_prod(self) -> "Settings":
+        # M3.7：与 fault_injection 同哲学——mock 是演示件，注入开关绝不带上生产
+        if self.app_env == "prod" and (self.mock_error_rate > 0 or self.mock_latency_ms > 0):
+            raise ValueError("prod 环境禁止开启 mock 故障注入（mock_error_rate/mock_latency_ms 必须为 0）")
         return self
 
     @model_validator(mode="after")
