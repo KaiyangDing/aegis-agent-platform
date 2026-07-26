@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from aegis.api import chat, kb, usage
 from aegis.api.ratelimit import InboundLimiterLike
 from aegis.apps.support.rag.retrieve import RetrievalProvider, Retriever
+from aegis.apps.support.revalidate import build_precheck
 from aegis.apps.support.service import ChatService
 from aegis.core.config import Settings, get_settings
 from aegis.core.db import get_session_factory
@@ -52,7 +53,7 @@ def create_app(
         gw = gw or build_gateway()
         lock = build_session_lock()
         retrieval = RetrievalProvider(Retriever(factory, build_embedding_client()))
-        runtime = AgentRuntime(gw, factory, lock=lock, retrieval=retrieval)
+        runtime = AgentRuntime(gw, factory, lock=lock, precheck=build_precheck(factory), retrieval=retrieval)
     app.state.runtime = runtime
     app.state.limiter = limiter or RateLimiter(get_redis(), replicas=s.replica_count)
     if chat_service is None and gw is not None:
