@@ -286,3 +286,118 @@ async def test_rag_insert_own_tenant_allowed(rag_rls_engine) -> None:
             async with conn.begin():
                 n = (await conn.execute(text("SELECT count(*) FROM chunks WHERE document_id = 'd-rls-a'"))).scalar_one()
     assert n == 2
+
+
+# ---------------------------------------------------------------------------
+# M3.7 增量：mock_orders/mock_write_ops——前置义务对账（plans/m3-detailed 14g 登记）
+# ---------------------------------------------------------------------------
+
+_MOCK_ORDER_PICK = text("SELECT id FROM mock_orders WHERE id LIKE 'mo-rls-%' ORDER BY id")
+
+
+@pytest.fixture
+async def mock_tables_ready(owner_engine):
+    """mock 两表已建才继续（迁移未跑：本地 skip / CI 硬失败——rag_tables_ready 同款门）。"""
+    async with owner_engine.connect() as conn:
+        ok = (
+            await conn.execute(
+                text("SELECT to_regclass('mock_orders') IS NOT NULL AND to_regclass('mock_write_ops') IS NOT NULL")
+            )
+        ).scalar_one()
+    if not ok:
+        if os.environ.get("CI"):
+            raise RuntimeError("CI 里 mock_orders/mock_write_ops 必须在位——检查 M3.7 迁移是否入链")
+        pytest.skip("mock_orders/mock_write_ops 未建：先 uv run alembic upgrade head")
+    yield owner_engine
+
+
+async def test_mock_tables_rls_policies_in_place(mock_tables_ready) -> None:
+    """前置义务本体（M3.4 同款）：DEFAULT PRIVILEGES 只授 DML、RLS 不隐式继承——两表策略随迁移自带。"""
+    async with mock_tables_ready.connect() as conn:
+        n = (
+            await conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_policies "
+                    "WHERE tablename IN ('mock_orders', 'mock_write_ops') AND policyname = 'tenant_isolation'"
+                )
+            )
+        ).scalar_one()
+    assert n == 2
+
+
+@pytest.fixture
+async def mock_rls_seeded(mock_tables_ready):
+    """两租户各一单（owner 种子、过滤式清理——前缀 mo-rls-/wo-rls-，全库扫描断言纪律）。"""
+    owner = mock_tables_ready
+    async with owner.begin() as conn:
+        await conn.execute(text("DELETE FROM mock_write_ops WHERE idempotency_key LIKE 'wo-rls-%'"))
+        await conn.execute(text("DELETE FROM mock_orders WHERE id LIKE 'mo-rls-%'"))
+        for oid, tid in (("mo-rls-a", "rls-t-a"), ("mo-rls-b", "rls-t-b")):
+            # 裸 INSERT 显式给全列：items 无默认、必须给（M3.3 偏差 ⒀ 同课）
+            await conn.execute(
+                text(
+                    "INSERT INTO mock_orders (id, tenant_id, user_id, status, paid_amount, items) "
+                    "VALUES (:o, :t, 'u-rls', 'paid', 199.99, '{}'::jsonb)"
+                ),
+                {"o": oid, "t": tid},
+            )
+    yield owner
+    async with owner.begin() as conn:
+        await conn.execute(text("DELETE FROM mock_write_ops WHERE idempotency_key LIKE 'wo-rls-%'"))
+        await conn.execute(text("DELETE FROM mock_orders WHERE id LIKE 'mo-rls-%'"))
+
+
+@pytest.fixture
+async def mock_rls_engine(mock_rls_seeded):
+    """低权引擎（rls_engine 同形态；依赖 mock 种子）。每测试新建，跨 event loop 纪律。"""
+    engine = create_async_engine(APP_URL)
+    install_tenant_guard(engine)
+    yield engine
+    await engine.dispose()
+
+
+async def test_mock_orders_isolated_by_tenant(mock_rls_engine) -> None:
+    """对抗③的库层底座：未设上下文空集（fail-closed）；a 只见 a 单、b 只见 b 单——
+    工具体内归属校验（交付③）之下还有这层兜底。"""
+
+    async def picks() -> list[str]:
+        async with mock_rls_engine.connect() as conn:
+            async with conn.begin():
+                return list((await conn.execute(_MOCK_ORDER_PICK)).scalars().all())
+
+    assert await picks() == []
+    with tenant_context("rls-t-a"):
+        assert await picks() == ["mo-rls-a"]
+    with tenant_context("rls-t-b"):
+        assert await picks() == ["mo-rls-b"]
+
+
+async def test_mock_write_op_wrong_tenant_rejected(mock_rls_engine) -> None:
+    """WITH CHECK 写路径：以 a 的上下文写 b 的去重行 → 42501（ProgrammingError）。"""
+    with tenant_context("rls-t-a"):
+        with pytest.raises(ProgrammingError):
+            async with mock_rls_engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "INSERT INTO mock_write_ops (idempotency_key, kind, tenant_id, payload) "
+                        "VALUES ('wo-rls-x', 'refund', 'rls-t-b', '{}'::jsonb)"
+                    )
+                )
+
+
+async def test_mock_write_op_own_tenant_allowed(mock_rls_engine) -> None:
+    """放行面与拒绝面成对（rag 先例同构）：本租户写去重行过 WITH CHECK——授权链活着的正面证明。"""
+    with tenant_context("rls-t-a"):
+        async with mock_rls_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO mock_write_ops (idempotency_key, kind, tenant_id, payload) "
+                    "VALUES ('wo-rls-ok', 'refund', 'rls-t-a', '{}'::jsonb)"
+                )
+            )
+        async with mock_rls_engine.connect() as conn:
+            async with conn.begin():
+                n = (
+                    await conn.execute(text("SELECT count(*) FROM mock_write_ops WHERE idempotency_key = 'wo-rls-ok'"))
+                ).scalar_one()
+    assert n == 1

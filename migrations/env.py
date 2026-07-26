@@ -6,6 +6,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import aegis.apps.support.mock_backend.models  # noqa: F401  —— 导入即注册：M3.7 模拟业务两表
 import aegis.apps.support.rag.models  # noqa: F401  —— 导入即注册：M3.4 摄取两表（vector 列）
 import aegis.core.tenancy  # noqa: F401  —— 导入即注册：M3.1 业务底座两表
 import aegis.gateway.metering  # noqa: F401  —— 导入即注册：模型进 Base.metadata，autogenerate 才看得见
