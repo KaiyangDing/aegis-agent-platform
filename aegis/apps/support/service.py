@@ -1,17 +1,19 @@
-"""chat 编排层（M3.8 交付②，plans §4.8）：intent→分支→run 的汇合点。
+"""chat 编排层（M3.8 交付②，M3.10② 流式化；plans §4.8/§4.10+14j）：intent→分支→run 汇合点。
 
-M3.2 端点收敛调用本层（响应仍 JSON 摘要），M3.10 把帧流式化（ChatFrame 即帧
-词汇前身）。分支纪律：
-- FAQ 直答守卫（M3.6 后置修订⑴，承重墙）：仅"会话无历史 且 租户配了 faq 摘要"
-  才直答——指代上文的跟进问被结构性挡回主 Agent（历史层在场）；
-- 直答/直通分支不经过 run：user_message 由本层写（D7），**先答后写**=失败零
-  残留、回落主 Agent 不双写；主分支 user_message 由 loop 写（U8），本层绝不碰；
-- 兜底路径②：预算类终止 → FALLBACK_LOOP_LIMIT + 建工单 + handoff 事件。
-Principal 不进本层：apps 不向上 import api——计划签名的层错已修正（偏差登记）。
+M3.10② 帧协议升级：逐 token 帧经 L2 text_sink 缝实时产出（观察者不改变事实——
+sink 只作用于通道，事件流照旧）；队列解耦生产与消费——token 在 run 推进（消费者
+__anext__ 阻塞）期间入队，单生成器无法边收边吐；**消费者退出（断连）不取消生产者**：
+run 是事实生产，观察者离场不中断，msgbuf 持续更新、用户经 GET 通道重连补收
+（ADR-007 断线语义）。分支纪律沿 M3.8：FAQ 直答守卫（无历史∧有摘要）/直答直通
+不经 run、user_message 由本层写（先答后写）/兜底② FALLBACK 替换打断话术出帧
+（流式形态=未经通道的话术押后为 pending、终局裁决）。拍板Ⅳ：直答流式段同过
+OutputGuard（02 §2⑨ 出口守卫在通道上生效）；拍板Ⅴ：done.usage 从本 run
+llm_result 实测累计（直答轮 usage=null 诚实缺席）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -19,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+import redis.asyncio as aioredis
 from sqlalchemy import func, select
 
 from aegis.apps.support.agent import build_agent_spec
@@ -28,6 +31,7 @@ from aegis.apps.support.prompts import FALLBACK_LOOP_LIMIT, HANDOFF_REPLY_TEMPLA
 from aegis.core.locks import SessionLock, hold_session_lock
 from aegis.core.tenancy import SessionFactory, TenantDirectory, TenantRecord
 from aegis.runtime.events import EventType
+from aegis.runtime.guardrails import SAFE_REPLY, Guardrails, output_audit_payload
 from aegis.runtime.runtime import AgentRuntime, GatewayLike
 from aegis.runtime.spec import AgentSpec, TerminationReason
 from aegis.runtime.store import EventWriter, MessageRecord
@@ -37,13 +41,76 @@ logger = logging.getLogger(__name__)
 _FALLBACK_REASONS = (TerminationReason.MAX_ITERATIONS.value, TerminationReason.TOKEN_BUDGET_EXCEEDED.value)
 """兜底路径②的触发集（§4.8）：达上限类终止补话术+转人工；其余终止原因原样透出。"""
 
+_MSGBUF_TTL_S = 3600
+"""进行中消息缓冲 TTL（§4.10）：Redis 挂/清除失败时的自然过期兜底。"""
+
+
+def msgbuf_key(session_id: str) -> str:
+    """缓冲键单点（ADR-005 角色1）：GET 通道（M3.10③）按同键读，改动两端同源。"""
+    return f"aegis:msgbuf:{session_id}"
+
 
 @dataclass(frozen=True, slots=True)
 class ChatFrame:
-    """服务层输出帧（M3.10 SSE 帧词汇前身）：kind ∈ token/tool_status/approval_pending/handoff/done。"""
+    """服务层输出帧=SSE 帧词汇（M3.10② 拍板Ⅲ：单一帧类型贯穿 service→通道）：
+    kind ∈ token/tool_status/approval_pending/handoff/done/error/message_reset；
+    seq 仅 GET 通道回放事件时在场（编码为 SSE id:，Last-Event-ID 续传）。"""
 
     kind: str
     data: Mapping[str, Any]
+    seq: int | None = None
+
+
+_BACKGROUND: set[asyncio.Task[None]] = set()
+"""脱缰生产者的强引用池（asyncio 纪律：running task 需持引用防 GC）。"""
+
+
+def _reap_producer(task: asyncio.Task[None]) -> None:
+    _BACKGROUND.discard(task)
+    if not task.cancelled():
+        exc = task.exception()  # 取回即标记 retrieved——压掉"never retrieved"日志噪音
+        if exc is not None:
+            # 有观察者时该异常已由 handle 尾部 await 重抛给端点；此处低噪留痕即可
+            logger.debug("chat 生产者收尾异常（多数已由端点处理）：%r", exc)
+
+
+class _TokenEmitter:
+    """单请求 token 出口（per-request 状态绝不上 ChatService——服务是进程级单例）。
+
+    三职责：帧入队；msgbuf 全量覆盖（**先写缓冲后入帧**——"消费到帧⇒缓冲可见"的
+    顺序承诺，测试与 GET 通道都吃它；Redis 挂=本请求降级留痕，绝不拖垮主链路）；
+    turn_text 记账（服务层判"assistant_message 是否已流出"的判据，llm_call 清零）。
+    """
+
+    def __init__(self, queue: asyncio.Queue[ChatFrame | None], redis: aioredis.Redis | None, session_id: str) -> None:
+        self._queue = queue
+        self._redis = redis
+        self._sid = session_id
+        self._acc = ""
+        self._down = False
+        self.turn_text = ""
+
+    def mark_turn(self) -> None:
+        self.turn_text = ""
+
+    async def emit(self, text: str) -> None:
+        self.turn_text += text
+        self._acc += text
+        if self._redis is not None and not self._down:
+            try:
+                await self._redis.set(msgbuf_key(self._sid), self._acc, ex=_MSGBUF_TTL_S)
+            except Exception:
+                self._down = True
+                logger.warning("msgbuf 写入失败，本请求降级无缓冲：session=%s", self._sid)
+        await self._queue.put(ChatFrame("token", {"text": text}))
+
+    async def clear(self) -> None:
+        if self._redis is None:
+            return
+        try:
+            await self._redis.delete(msgbuf_key(self._sid))
+        except Exception:
+            logger.warning("msgbuf 清除失败（TTL %ds 兜底）：session=%s", _MSGBUF_TTL_S, self._sid)
 
 
 @asynccontextmanager
@@ -67,12 +134,14 @@ class ChatService:
         directory: TenantDirectory,
         runtime: AgentRuntime,
         lock: SessionLock | None = None,
+        redis: aioredis.Redis | None = None,
     ) -> None:
         self._gateway = gateway
         self._factory = factory
         self._directory = directory
         self._runtime = runtime
         self._lock = lock
+        self._redis = redis  # msgbuf 通道（M3.10②）；None=无缓冲（测试形态/降级）
 
     async def resolve_tenant(self, tenant_id: str) -> TenantRecord:
         """租户行缺失=测试/裸库形态：合成空配置（无工具无 faq）留痕告警、不拒服务——
@@ -88,20 +157,32 @@ class ChatService:
         return build_agent_spec(await self.resolve_tenant(tenant_id))
 
     async def handle(self, *, tenant_id: str, user_id: str, session_id: str, message: str) -> AsyncIterator[ChatFrame]:
-        """一条消息的编排：分类一次 → 三路分支。归属/准入/限流已由端点完成。"""
-        tenant = await self.resolve_tenant(tenant_id)
-        intent = await classify(self._gateway, message, tenant_id=tenant_id, session_id=session_id)
-        faq_digest = str(tenant.config.get("faq") or "")
-        if intent is Intent.FAQ and faq_digest and not await self._has_history(session_id):
-            async for frame in self._faq_direct(tenant, user_id, session_id, message, faq_digest):
-                yield frame
-            return
-        if intent is Intent.HANDOFF:
-            async for frame in self._handoff_direct(tenant, user_id, session_id, message):
-                yield frame
-            return
-        async for frame in self._run_main(tenant, user_id, session_id, message):
+        """一条消息的编排：分类一次 → 三路分支；帧经队列实时出流（模块 docstring）。"""
+        queue: asyncio.Queue[ChatFrame | None] = asyncio.Queue()
+        produced = asyncio.create_task(
+            self._produce(queue, tenant_id=tenant_id, user_id=user_id, session_id=session_id, message=message)
+        )
+        _BACKGROUND.add(produced)
+        produced.add_done_callback(_reap_producer)
+        while (frame := await queue.get()) is not None:
             yield frame
+        await produced  # 生产者异常在此重抛——首帧前的 SessionLockHeld 经端点 peek 仍映射 409
+
+    async def _produce(
+        self, queue: asyncio.Queue[ChatFrame | None], *, tenant_id: str, user_id: str, session_id: str, message: str
+    ) -> None:
+        try:
+            tenant = await self.resolve_tenant(tenant_id)
+            intent = await classify(self._gateway, message, tenant_id=tenant_id, session_id=session_id)
+            faq_digest = str(tenant.config.get("faq") or "")
+            if intent is Intent.FAQ and faq_digest and not await self._has_history(session_id):
+                await self._faq_direct(queue, tenant, user_id, session_id, message, faq_digest)
+            elif intent is Intent.HANDOFF:
+                await self._handoff_direct(queue, tenant, user_id, session_id, message)
+            else:
+                await self._run_main(queue, tenant, user_id, session_id, message)
+        finally:
+            await queue.put(None)  # 哨兵恒发：异常路径消费者才能退出等待、经 await 收到异常
 
     async def _has_history(self, session_id: str) -> bool:
         """守卫判据：messages 投影有行即有历史（FAQ 直答轮也写投影 D7——第二轮起必真）。"""
@@ -114,30 +195,69 @@ class ChatService:
         return n > 0
 
     async def _faq_direct(
-        self, tenant: TenantRecord, user_id: str, session_id: str, message: str, faq_digest: str
-    ) -> AsyncIterator[ChatFrame]:
+        self,
+        queue: asyncio.Queue[ChatFrame | None],
+        tenant: TenantRecord,
+        user_id: str,
+        session_id: str,
+        message: str,
+        faq_digest: str,
+    ) -> None:
+        spec = build_agent_spec(tenant)
+        # 拍板Ⅳ：直答是"通道上的出口"，02 §2⑨ 守卫在通道生效——参数与主 Agent 同源
+        guard = Guardrails().output_guard(
+            system_prompt=spec.system_prompt,
+            tool_names=[t.name for t in spec.tools],
+            owned_values=spec.owned_values,
+        )
+        emitter = _TokenEmitter(queue, self._redis, session_id)
+        visible = ""
         try:
-            parts = [
-                p
-                async for p in answer_faq(
-                    self._gateway, message, tenant_id=tenant.id, session_id=session_id, faq_digest=faq_digest
-                )
-            ]
-            text = "".join(parts)
+            async for part in answer_faq(
+                self._gateway, message, tenant_id=tenant.id, session_id=session_id, faq_digest=faq_digest
+            ):
+                released = guard.feed(part)
+                if released:
+                    visible += released
+                    await emitter.emit(released)
+            tail = guard.flush()
+            if tail:
+                visible += tail
+                await emitter.emit(tail)
         except Exception:
-            # 直答是该轮主路径：失败回落主 Agent（同样正确的路）。先答后写保证此刻
-            # 零事件残留——回落后 user_message 由 loop 写，绝不双写
+            # 直答是主路径：失败回落主 Agent（同样正确的路）。先答后写=此刻零事件残留；
+            # 已推段作废是通道现实（流式代价），缓冲清掉防 GET 侧残影
             logger.warning("FAQ 直答失败，回落主 Agent：session=%s", session_id, exc_info=True)
-            async for frame in self._run_main(tenant, user_id, session_id, message):
-                yield frame
+            await emitter.clear()
+            await self._run_main(queue, tenant, user_id, session_id, message)
             return
-        await self._write_direct(session_id, message, [(EventType.ASSISTANT_MESSAGE, {"content": text})])
-        yield ChatFrame("token", {"text": text})
-        yield ChatFrame("done", {"reason": "faq_direct", "trace_id": session_id, "events": 2})
+        hit = guard.hit
+        final_hits = [] if hit is not None else guard.final_check(visible)
+        tail_events: list[tuple[EventType, dict[str, Any]]]
+        if hit is not None or final_hits:
+            # 直答通道命中同样留审计（与 loop 挂点③对齐）；流中命中=通道≡事件，
+            # 终局命中=事件存 SAFE_REPLY 为准（已推流不可撤回，14j 已知分岔）
+            await emitter.emit(SAFE_REPLY)
+            stage = "stream" if hit is not None else "final"
+            content = (visible + SAFE_REPLY) if hit is not None else SAFE_REPLY
+            tail_events = [
+                (EventType.GUARDRAIL_TRIGGERED, output_audit_payload(hit or final_hits[0], stage=stage)),
+                (EventType.ASSISTANT_MESSAGE, {"content": content, "guardrail_truncated": True}),
+            ]
+        else:
+            tail_events = [(EventType.ASSISTANT_MESSAGE, {"content": visible})]
+        await self._write_direct(session_id, message, tail_events)
+        await emitter.clear()
+        await queue.put(ChatFrame("done", {"reason": "faq_direct", "trace_id": session_id, "usage": None}))
 
     async def _handoff_direct(
-        self, tenant: TenantRecord, user_id: str, session_id: str, message: str
-    ) -> AsyncIterator[ChatFrame]:
+        self,
+        queue: asyncio.Queue[ChatFrame | None],
+        tenant: TenantRecord,
+        user_id: str,
+        session_id: str,
+        message: str,
+    ) -> None:
         result = await create_handoff(
             factory=self._factory, session_id=session_id, tenant_id=tenant.id, user_id=user_id, reason="user_requested"
         )
@@ -147,9 +267,9 @@ class ChatService:
             message,
             [(EventType.HANDOFF, dict(result)), (EventType.ASSISTANT_MESSAGE, {"content": reply})],
         )
-        yield ChatFrame("token", {"text": reply})
-        yield ChatFrame("handoff", dict(result))
-        yield ChatFrame("done", {"reason": "handoff", "trace_id": session_id, "events": 3})
+        await queue.put(ChatFrame("token", {"text": reply}))  # 运行时模板：M2.8 豁免口径不过守卫
+        await queue.put(ChatFrame("handoff", dict(result)))
+        await queue.put(ChatFrame("done", {"reason": "handoff", "trace_id": session_id, "usage": None}))
 
     async def _write_direct(
         self, session_id: str, user_text: str, tail: list[tuple[EventType, dict[str, Any]]]
@@ -162,44 +282,82 @@ class ChatService:
                 await writer.append(etype, payload)
 
     async def _run_main(
-        self, tenant: TenantRecord, user_id: str, session_id: str, message: str
-    ) -> AsyncIterator[ChatFrame]:
-        """主分支：RAG/TOOL/AGENT 同入完整 Agent（拍板Ⅲ：检索槽每轮注入，分支不特殊化）。"""
+        self,
+        queue: asyncio.Queue[ChatFrame | None],
+        tenant: TenantRecord,
+        user_id: str,
+        session_id: str,
+        message: str,
+    ) -> None:
+        """主分支：RAG/TOOL/AGENT 同入完整 Agent；逐 token 经 L2 text_sink 缝实时出流。
+
+        帧译规则：llm_call=turn 记账清零（不出帧）；assistant_message 与本 turn 流出
+        文本不等=未经通道的话术（打断兜底等）→ 押后 pending、终局裁决后出帧
+        （FALLBACK_REASONS 被替换丢弃——M3.8"替换非叠加"定案的流式形态）；
+        usage 从 llm_result(ok) 实测累计（拍板Ⅴ）。挂起=无终止事件：清缓冲、
+        不发 done（approval_pending 已出帧，客户端据此换 GET 通道——ADR-007）。
+        """
         spec = build_agent_spec(tenant)
-        reply: str | None = None
+        emitter = _TokenEmitter(queue, self._redis, session_id)
+        pending: str | None = None
         term: Mapping[str, Any] | None = None
-        count = 0
-        async for event in self._runtime.run(spec, session_id, message):
-            count += 1
-            if event.type is EventType.ASSISTANT_MESSAGE:
-                reply = str(event.payload["content"])
+        prompt_tokens = completion_tokens = 0
+        last_tool = ""
+        async for event in self._runtime.run(spec, session_id, message, text_sink=emitter.emit):
+            if event.type is EventType.LLM_CALL:
+                emitter.mark_turn()
+            elif event.type is EventType.LLM_RESULT and event.payload.get("status") == "ok":
+                usage = event.payload.get("usage") or {}
+                prompt_tokens += int(usage.get("prompt_tokens") or 0)
+                completion_tokens += int(usage.get("completion_tokens") or 0)
+            elif event.type is EventType.ASSISTANT_MESSAGE:
+                content = str(event.payload["content"])
+                if content != emitter.turn_text:
+                    pending = content
             elif event.type is EventType.TOOL_CALL:
-                yield ChatFrame("tool_status", {"tool_name": event.payload["tool_name"], "status": "running"})
+                last_tool = str(event.payload["tool_name"])
+                await queue.put(ChatFrame("tool_status", {"tool_name": last_tool, "status": "running"}))
+            elif event.type is EventType.TOOL_RESULT:
+                await queue.put(ChatFrame("tool_status", {"tool_name": last_tool, "status": "ok"}))
+            elif event.type is EventType.TOOL_ERROR:
+                await queue.put(ChatFrame("tool_status", {"tool_name": last_tool, "status": "error"}))
             elif event.type is EventType.APPROVAL_REQUESTED:
-                yield ChatFrame(
-                    "approval_pending",
-                    {
-                        "approval_id": event.payload["approval_id"],
-                        "tool_name": event.payload["tool_name"],
-                        "expires_at": event.payload["expires_at"],
-                    },
+                await queue.put(
+                    ChatFrame(
+                        "approval_pending",
+                        {
+                            "approval_id": event.payload["approval_id"],
+                            "tool_name": event.payload["tool_name"],
+                            "expires_at": event.payload["expires_at"],
+                        },
+                    )
                 )
             elif event.type is EventType.LOOP_TERMINATED:
                 term = event.payload
         if term is None:
-            return  # 干净挂起（D2 哨兵）：approval_pending 帧已发，awaiting 摘要归端点
+            await emitter.clear()  # 干净挂起：turn 前置残段不留 GET 残影
+            return
         reason = str(term["reason"])
         if reason in _FALLBACK_REASONS:
-            # 兜底路径②：FALLBACK 话术**替换** loop 的通用打断话术出帧（原话仍在事件流/
-            # 历史里，X4 不丢事实）——用户面只见一条带工单号的最终答复
+            # 兜底路径②：FALLBACK 话术**替换**打断话术出帧（pending 丢弃；原话在事件流 X4 不丢）
             result = await create_handoff(
                 factory=self._factory, session_id=session_id, tenant_id=tenant.id, user_id=user_id, reason=reason
             )
             async with _maybe_hold(self._lock, session_id):
                 writer = await EventWriter.open(self._factory, session_id, run_id=uuid4().hex)
                 await writer.append(EventType.HANDOFF, dict(result))
-            yield ChatFrame("token", {"text": FALLBACK_LOOP_LIMIT})
-            yield ChatFrame("handoff", dict(result))
-        elif reply is not None:
-            yield ChatFrame("token", {"text": reply})
-        yield ChatFrame("done", {"reason": reason, "trace_id": session_id, "events": count})
+            await queue.put(ChatFrame("token", {"text": FALLBACK_LOOP_LIMIT}))
+            await queue.put(ChatFrame("handoff", dict(result)))
+        elif pending is not None:
+            await queue.put(ChatFrame("token", {"text": pending}))
+        await emitter.clear()
+        await queue.put(
+            ChatFrame(
+                "done",
+                {
+                    "reason": reason,
+                    "trace_id": session_id,
+                    "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+                },
+            )
+        )

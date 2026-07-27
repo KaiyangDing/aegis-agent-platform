@@ -1,23 +1,28 @@
-"""POST /v1/chat（M3.2 入站三件 + M3.8② 收敛调用 ChatService）。
+"""POST /v1/chat（M3.2 入站 + M3.8 编排 + M3.10② SSE 流式化）。
 
-准入链归端点（401 认证/403 角色/404 归属/409 冲突/422 载荷/429 限流——分工
-不变量，绝不互相冒充）；意图分诊→分支→run 归 ChatService（apps 层）。
-user_message 归属：主分支由 loop 写、直答分支由 service 写——端点永不写事件。
-响应仍为 JSON 摘要（SSE 化归 M3.10，届时帧直接透传）。
+准入链与状态码分工不变量沿 M3.2（401/403/404/409/422/429——全部发生在流开始
+之前，绝不互相冒充）；200 一律 text/event-stream（M3.2 占位 JSON 协议退役）。
+主分支 peek 首帧：runtime 内锁/T1 竞态发生在首帧之前，peek 让它们仍映射 409
+（M3.2 契约保持）；首帧之后已无法改状态码——异常译为 error 帧收流（打码话术，
+不透内部异常文本）。取消与 awaiting 准入以短流回应（同端点同媒体类型不分岔）。
 取消是安全动作：只认显式 cancel_pending_approval 字段，不做自然语言猜测。
 """
 
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from aegis.api.auth import Principal, require_roles
 from aegis.api.ratelimit import rate_limited
+from aegis.api.sse import encode_frame
 from aegis.apps.support.service import ChatFrame, ChatService
 from aegis.core.locks import SessionLockHeld
 from aegis.core.tenancy import Role, SessionFactory
@@ -33,10 +38,14 @@ from aegis.runtime.store import (
     SessionRecord,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _ADMITTED = rate_limited(require_roles(Role.USER, Role.ADMIN))
 """准入链 401→403→429：矩阵 POST /v1/chat 的 operator 列为 —（02 §7.1），坐席不替用户发消息。"""
+
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+"""§4.10 陷阱清单：no-cache 防中间缓存攒帧；X-Accel-Buffering 关反代缓冲（M5.3 部署面镜像）。"""
 
 
 class ChatRequest(BaseModel):
@@ -76,13 +85,7 @@ async def _find_pending(factory: SessionFactory, session_id: str) -> ApprovalRec
 
 
 async def _collect(agen: Any) -> list[Any]:
-    """收集帧/事件流并把并发信号映射为 409（M3.2 原样，泛化到帧）。
-
-    except 阶梯顺序即语义：SessionLockHeld（锁/租约被占）→ 409；事实源三类
-    （EventStoreUnavailable/EventWriteFenced/LeaseLost 均为 RuntimeError 子类）
-    裸穿=服务不可用级响亮失败；最后才兜 T1 拒绝起跑的裸 RuntimeError（准入读态
-    与 run 之间的残余竞态窗）→ 409。顺序错一行就会把围栏自毁吞成客服话术。
-    """
+    """收集事件流并把并发信号映射为 409（取消路径专用；阶梯顺序即语义——详见原注）。"""
     try:
         return [x async for x in agen]
     except SessionLockHeld as e:
@@ -93,26 +96,26 @@ async def _collect(agen: Any) -> list[Any]:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="会话状态冲突，请稍后重试") from e
 
 
-def _summary(session_id: str, frames: list[ChatFrame]) -> dict[str, Any]:
-    """占位 JSON 摘要（M3.10 换 SSE 帧）：有 done 帧 → done；干净挂起 → awaiting_approval。"""
-    done = next((f.data for f in reversed(frames) if f.kind == "done"), None)
-    if done is None:  # 无 done = 干净挂起，本轮必有 approval_pending 帧
-        pend = next(f.data for f in reversed(frames) if f.kind == "approval_pending")
-        return {
-            "session_id": session_id,
-            "status": "awaiting_approval",
-            "approval_id": pend["approval_id"],
-            "tool_name": pend["tool_name"],
-            "expires_at": pend["expires_at"],
-        }
-    reply = next((f.data["text"] for f in reversed(frames) if f.kind == "token"), None)
-    return {
-        "session_id": session_id,
-        "status": "done",
-        "reason": done["reason"],
-        "reply": reply,
-        "events": done.get("events", 0),
-    }
+def _short_stream(frames: list[ChatFrame]) -> StreamingResponse:
+    """取消/准入类动作的短流回应：同端点同媒体类型，客户端解析器不分岔。"""
+
+    async def _gen() -> AsyncIterator[str]:
+        for frame in frames:
+            yield encode_frame(frame)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+async def _relay(first: ChatFrame, rest: AsyncIterator[ChatFrame]) -> AsyncIterator[str]:
+    """已开流的中继：此后异常无法改状态码，译 error 帧收流（已落盘事件不受影响，
+    用户可经 GET 通道重连取回真相）。"""
+    try:
+        yield encode_frame(first)
+        async for frame in rest:
+            yield encode_frame(frame)
+    except Exception:
+        logger.exception("SSE 流中异常——译为 error 帧收流")
+        yield encode_frame(ChatFrame("error", {"message": "服务暂时不可用，请稍后重试"}))
 
 
 @router.post("/v1/chat")
@@ -120,7 +123,7 @@ async def post_chat(
     request: Request,
     body: ChatRequest,
     principal: Annotated[Principal, Depends(_ADMITTED)],
-) -> dict[str, Any]:
+) -> StreamingResponse:
     factory: SessionFactory = request.app.state.session_factory
     runtime: AgentRuntime = request.app.state.runtime
     service: ChatService | None = request.app.state.chat_service
@@ -138,26 +141,49 @@ async def post_chat(
             # 与坐席 decide / reaper 到期赛跑输了：绝不覆盖赢家（C11），按当前实况回
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="审批单已失效或已处理")
         spec = await service.build_spec(principal.tenant_id)  # 按租户装配（PLACEHOLDER_SPEC 已退役）
-        events = await _collect(runtime.resume(spec, body.session_id, approval_id=pending.id))
-        return {"session_id": body.session_id, "status": "cancelled", "approval_id": pending.id, "events": len(events)}
+        await _collect(runtime.resume(spec, body.session_id, approval_id=pending.id))
+        return _short_stream(
+            [
+                ChatFrame(
+                    "done",
+                    {"reason": "cancelled", "approval_id": pending.id, "trace_id": body.session_id, "usage": None},
+                )
+            ]
+        )
 
     if run_state == RunState.AWAITING_APPROVAL.value:
         # 准入规则（02 §2 ③）：审批期间不开新循环；附单号供前端引导取消/等待
         pending = await _find_pending(factory, body.session_id)
-        return {
-            "session_id": body.session_id,
-            "status": "awaiting_approval",
-            "detail": "有待审批操作进行中，请等待审批结果或明确取消",
-            "approval_id": pending.id if pending else None,
-        }
+        frames: list[ChatFrame] = []
+        if pending is not None:
+            frames.append(
+                ChatFrame(
+                    "approval_pending",
+                    {
+                        "approval_id": pending.id,
+                        "tool_name": pending.tool_name,
+                        "expires_at": pending.expires_at.isoformat(),
+                    },
+                )
+            )
+        frames.append(ChatFrame("done", {"reason": "awaiting_approval", "trace_id": body.session_id, "usage": None}))
+        return _short_stream(frames)
 
-    # 正常路：交给编排层（intent→分支→run）。user_message 归属见模块 docstring
-    frames = await _collect(
-        service.handle(
-            tenant_id=principal.tenant_id,
-            user_id=principal.user_id,
-            session_id=body.session_id,
-            message=body.message,
-        )
+    # 正常路：交给编排层（intent→分支→run）。peek 首帧：锁/T1 竞态仍映射 409（M3.2 契约）
+    stream = service.handle(
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        session_id=body.session_id,
+        message=body.message,
     )
-    return _summary(body.session_id, frames)
+    try:
+        first = await anext(stream)
+    except StopAsyncIteration:
+        return _short_stream([])  # 理论不可达（任何分支至少一帧）——诚实空流
+    except SessionLockHeld as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="上一条消息处理中") from e
+    except (EventStoreUnavailable, EventWriteFenced, LeaseLost):
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="会话状态冲突，请稍后重试") from e
+    return StreamingResponse(_relay(first, stream), media_type="text/event-stream", headers=_SSE_HEADERS)

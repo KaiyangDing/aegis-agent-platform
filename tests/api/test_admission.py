@@ -1,12 +1,15 @@
 """M3.2：POST /v1/chat 入站三件——限流 429/互斥 409/准入与显式取消 + user_message 经 run 落盘。
 
 状态码分工不变量全钉：401 认证/403 角色/404 归属/409 冲突/422 载荷/429 限流。
+M3.10② 起 200 路一律 text/event-stream（M3.2 占位 JSON 协议退役）——本文件 200 路
+断言随协议换轨为帧断言；非 200 路状态码分工原样（全部发生在流开始之前）。
 网关用最小文本桩（GatewayLike 形状），锁用可编程假锁——零真实调用零 Redis 依赖；
 DB 走 SAVEPOINT 夹具。
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -85,6 +88,20 @@ def _bearer(role: Role = Role.USER, uid: str = "u-a1", tid: str = "tenant-a") ->
 
 def _payload(sid: str = "s-chat-1", msg: str = "你好", cancel: bool = False) -> dict:
     return {"session_id": sid, "message": msg, "cancel_pending_approval": cancel}
+
+
+def _frames(text: str) -> list[tuple[str, dict]]:
+    """SSE 文本 → [(event, data)]（M3.10②：200 路协议换轨后的消费端）。"""
+    out: list[tuple[str, dict]] = []
+    for block in text.strip().split("\n\n"):
+        event, data = "", {}
+        for line in block.split("\n"):
+            if line.startswith("event: "):
+                event = line[len("event: ") :]
+            elif line.startswith("data: "):
+                data = json.loads(line[len("data: ") :])
+        out.append((event, data))
+    return out
 
 
 async def _events(factory, sid: str) -> list[tuple[int, str]]:
@@ -169,9 +186,11 @@ async def test_first_message_creates_session_and_runs(db_session_factory) -> Non
     async with _client(_make_app(db_session_factory)) as c:
         resp = await c.post("/v1/chat", json=_payload(sid="s-new"), headers=_bearer())
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "done" and body["reason"] == "completed"
-    assert body["reply"] == "好的，已收到。"
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    frames = _frames(resp.text)
+    assert [k for k, _ in frames] == ["token", "done"]
+    assert frames[0][1]["text"] == "好的，已收到。"
+    assert frames[1][1]["reason"] == "completed" and frames[1][1]["trace_id"] == "s-new"
     events = await _events(db_session_factory, "s-new")
     assert [t for _, t in events] == ["user_message", "llm_call", "llm_result", "assistant_message", "loop_terminated"]
     assert [seq for seq, _ in events] == [1, 2, 3, 4, 5]
@@ -198,8 +217,10 @@ async def test_awaiting_approval_blocks_new_run(db_session_factory) -> None:
     async with _client(_make_app(db_session_factory)) as c:
         resp = await c.post("/v1/chat", json=_payload(sid="s-wait", msg="怎么还没好"), headers=_bearer())
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "awaiting_approval" and body["approval_id"] == aid
+    frames = _frames(resp.text)
+    assert [k for k, _ in frames] == ["approval_pending", "done"]
+    assert frames[0][1]["approval_id"] == aid
+    assert frames[1][1]["reason"] == "awaiting_approval"
     assert await _events(db_session_factory, "s-wait") == []
 
 
@@ -209,7 +230,9 @@ async def test_cancel_flips_approval_and_terminates(db_session_factory) -> None:
     async with _client(_make_app(db_session_factory)) as c:
         resp = await c.post("/v1/chat", json=_payload(sid="s-cancel", cancel=True), headers=_bearer())
     assert resp.status_code == 200
-    assert resp.json()["status"] == "cancelled"
+    frames = _frames(resp.text)
+    assert [k for k, _ in frames] == ["done"]
+    assert frames[0][1]["reason"] == "cancelled" and frames[0][1]["approval_id"] == aid
     async with db_session_factory() as s:
         approval = (await s.execute(select(ApprovalRecord).where(ApprovalRecord.id == aid))).scalar_one()
         session = (await s.execute(select(SessionRecord).where(SessionRecord.id == "s-cancel"))).scalar_one()

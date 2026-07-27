@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import redis.asyncio as aioredis
 from fastapi import FastAPI
 
 from aegis.api import approvals, chat, kb, usage
@@ -53,17 +54,24 @@ def create_app(
     app.state.session_factory = factory
     gw = gateway
     lock: SessionLock | None = None
+    msg_redis: aioredis.Redis | None = None
     if runtime is None:
         gw = gw or build_gateway()
         lock = build_session_lock()
         retrieval = RetrievalProvider(Retriever(factory, build_embedding_client()))
         # M3.9①（#8）：批准后前置校验接线——M2.9 挂点在此通电，API 与 worker 共用同一模块
         runtime = AgentRuntime(gw, factory, lock=lock, precheck=build_precheck(factory), retrieval=retrieval)
+        msg_redis = get_redis()  # M3.10②：msgbuf 只在生产装配链接线（测试注入 runtime 时=None）
     app.state.runtime = runtime
     app.state.limiter = limiter or RateLimiter(get_redis(), replicas=s.replica_count)
     if chat_service is None and gw is not None:
         chat_service = ChatService(
-            gateway=gw, factory=factory, directory=TenantDirectory(factory), runtime=runtime, lock=lock
+            gateway=gw,
+            factory=factory,
+            directory=TenantDirectory(factory),
+            runtime=runtime,
+            lock=lock,
+            redis=msg_redis,
         )
     app.state.chat_service = chat_service
     app.state.enqueue = enqueue or kb.build_enqueue(s)
