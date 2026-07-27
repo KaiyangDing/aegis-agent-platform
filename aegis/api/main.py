@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 
 from aegis.api import approvals, chat, events_view, kb, stream, usage
 from aegis.api.notify import EventNotifier
@@ -26,6 +28,8 @@ from aegis.gateway.factory import build_embedding_client, build_gateway
 from aegis.gateway.ratelimit import RateLimiter
 from aegis.runtime.runtime import AgentRuntime, GatewayLike
 
+_CHAT_PAGE = Path(__file__).resolve().parents[1] / "web" / "chat.html"
+"""演示聊天页（M3.10④，01 §5 单文件无构建链）：Path(__file__) 锚定不依赖 cwd（07 §4 第 7 条）。"""
 
 def create_app(
     settings: Settings | None = None,
@@ -100,5 +104,9 @@ def create_app(
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:  # 存活探针（02 §9）：不查依赖，进程活着就 200
         return {"status": "ok"}
+
+    @app.get("/chat")
+    async def chat_page() -> FileResponse:  # 演示聊天页：同源出页（file:// 直开撞 CORS，不加中间件是刻意最小面）
+        return FileResponse(_CHAT_PAGE, media_type="text/html; charset=utf-8")
 
     return app

@@ -261,6 +261,16 @@ async def test_infra_error_after_first_frame_becomes_error_frame(db_session_fact
     assert "服务" in frames[-1][1]["message"]  # 打码话术，不透内部异常文本
 
 
+async def test_chat_page_served_same_origin(db_session_factory) -> None:
+    """M3.10④：/chat 同源出页（file:// 直开会撞 CORS——不加 CORS 中间件是刻意的最小面）。"""
+    gw = _ChunkSeqGateway([_text_script("tool")])
+    async with _client(_make_app(db_session_factory, gw)) as c:
+        resp = await c.get("/chat")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "Aegis 客服演示" in resp.text
+
+
 class _GatedGateway:
     """第二句前卡闸：制造确定性的"进行中"状态（msgbuf 断言无竞态的关键）。"""
 
