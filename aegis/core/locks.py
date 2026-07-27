@@ -279,10 +279,14 @@ class FailoverSessionLock:
         return ok
 
 
-def build_session_lock() -> SessionLock:
+def build_session_lock(*, redis: aioredis.Redis | None = None, engine: AsyncEngine | None = None) -> SessionLock:
     """组装在边缘（与 gateway/factory.py 同哲学）：Redis 主 + PG advisory 降级。
 
-    仅供生产组装（M3.2 API 层）调用——get_redis()/get_engine() 是进程级单例，
-    跨 event loop 不可复用，测试一律显式注入自建客户端/引擎的锁实例。
+    缺省 None=生产 API 组装用进程单例（M3.2 现场，现行为零改动）；get_redis()/
+    get_engine() 跨 event loop 不可复用——worker 任务体传任务局部实例（M3.9④），
+    测试一律显式注入自建客户端/引擎的锁实例。
     """
-    return FailoverSessionLock(RedisSessionLock(get_redis()), PgAdvisorySessionLock(get_engine()))
+    return FailoverSessionLock(
+        RedisSessionLock(redis if redis is not None else get_redis()),
+        PgAdvisorySessionLock(engine if engine is not None else get_engine()),
+    )

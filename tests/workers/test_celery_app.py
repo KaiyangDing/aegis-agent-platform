@@ -12,10 +12,18 @@ def test_broker_url_from_settings() -> None:
 
 
 def test_beat_schedule_has_reaper_entry() -> None:
-    """beat 恰一条：键名/task 路径/间隔=Settings.reaper_interval_s（P2）。"""
+    """reaper 行：键名/task 路径/间隔=Settings.reaper_interval_s（P2）。
+    （M3.9④ 起 beat 两条，"恰一条"旧口径随 expire-approvals 入驻作废。）"""
     entry = celery_app.conf.beat_schedule["reap-expired-leases"]
     assert entry["task"] == "aegis.workers.reaper.reap_expired_leases"
     assert entry["schedule"] == get_settings().reaper_interval_s
+
+
+def test_beat_schedule_has_approval_sweep_entry() -> None:
+    """M3.9④：审批对账行——task 路径/间隔=Settings.approval_scan_interval_s（§4.9 决策 60s）。"""
+    entry = celery_app.conf.beat_schedule["expire-approvals"]
+    assert entry["task"] == "aegis.workers.hitl.expire_approvals"
+    assert entry["schedule"] == get_settings().approval_scan_interval_s
 
 
 def test_reaper_task_registered() -> None:
@@ -23,6 +31,13 @@ def test_reaper_task_registered() -> None:
     import aegis.workers.reaper  # noqa: F401  # 触发任务注册（worker 由 include 完成同一件事）
 
     assert "aegis.workers.reaper.reap_expired_leases" in celery_app.tasks
+
+
+def test_hitl_task_registered() -> None:
+    """M3.9④：hitl 模块任务同口径注册（include 点名第三员）。"""
+    import aegis.workers.hitl  # noqa: F401
+
+    assert "aegis.workers.hitl.expire_approvals" in celery_app.tasks
 
 
 def test_task_ignore_result_on() -> None:

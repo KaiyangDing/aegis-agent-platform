@@ -1,4 +1,4 @@
-"""Celery 应用（M2.10）：broker=Redis、无 result backend、beat 只挂 reaper 一条。
+"""Celery 应用（M2.10）：broker=Redis、无 result backend、beat 挂 reaper 与审批对账两条。
 
 Windows 本地调试：`uv run celery -A aegis.workers.celery_app worker --pool=solo -l info`
 （Celery 4 起官方放弃 Windows prefork——06 §4 第 1 坑）；beat 另开窗口或 `-B` 单进程；
@@ -16,7 +16,9 @@ from aegis.core.config import get_settings
 celery_app = Celery(
     "aegis",
     broker=get_settings().redis_url,  # ADR-005 角色 4：Celery broker
-    include=["aegis.workers.ingest", "aegis.workers.reaper"],  # 显式点名任务模块，不用 autodiscover（可 grep、可审计）
+    # 显式点名任务模块，不用 autodiscover（可 grep、可审计）；hitl 的 import 副作用
+    # 同时完成真实恢复钩子注册（M3.9④ 拍板Ⅰ——worker 起=钩子在）
+    include=["aegis.workers.ingest", "aegis.workers.reaper", "aegis.workers.hitl"],
 )
 celery_app.conf.update(
     task_ignore_result=True,  # 无 result backend（3.2#9）：结果进日志与事件流，少一个 Redis 键面
@@ -28,5 +30,9 @@ celery_app.conf.beat_schedule = {
     "reap-expired-leases": {
         "task": "aegis.workers.reaper.reap_expired_leases",
         "schedule": get_settings().reaper_interval_s,  # 秒数即间隔（P2：30s）
-    }
+    },
+    "expire-approvals": {
+        "task": "aegis.workers.hitl.expire_approvals",
+        "schedule": get_settings().approval_scan_interval_s,  # M3.9：审批到期+对账（§4.9 决策 60s）
+    },
 }

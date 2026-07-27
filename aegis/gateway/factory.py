@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 import httpx
+import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from aegis.core.config import get_settings
@@ -25,19 +26,33 @@ def _price_table(raw: dict[str, list[float]]) -> PriceTable:
     return {m: (Decimal(str(p)), Decimal(str(c))) for m, (p, c) in raw.items()}
 
 
-def build_gateway() -> LLMGateway:
+def build_gateway(
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    redis: aioredis.Redis | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> LLMGateway:
+    """真实网关组装。三参数全缺省 None=API 进程用进程单例（现行为零改动）；
+    worker 每任务 asyncio.run 新 loop，三单例（get_session_factory/get_redis/
+    shared_client）都绑创建时的 loop——任务体传任务局部实例（M3.9④ 受控缝，
+    build_embedding_client 双参数化同款工程）。"""
     s = get_settings()
+    sf = session_factory or get_session_factory()
+    r = redis if redis is not None else get_redis()
     providers: dict[str, Provider] = {
-        "bailian": OpenAICompatProvider("bailian", s.dashscope_base_url, s.dashscope_api_key.get_secret_value()),
-        "anthropic": AnthropicProvider("anthropic", s.anthropic_base_url, s.anthropic_api_key.get_secret_value()),
+        "bailian": OpenAICompatProvider(
+            "bailian", s.dashscope_base_url, s.dashscope_api_key.get_secret_value(), client=client
+        ),
+        "anthropic": AnthropicProvider(
+            "anthropic", s.anthropic_base_url, s.anthropic_api_key.get_secret_value(), client=client
+        ),
     }
-    redis = get_redis()
     return LLMGateway(
         providers=providers,
         routes=parse_routes(s.model_routes, set(providers)),
-        breaker=CircuitBreaker(redis),
-        limiter=RateLimiter(redis, replicas=s.replica_count),
-        cache=ExactCache(redis, ttl_seconds=s.cache_ttl_seconds) if s.cache_ttl_seconds > 0 else None,
+        breaker=CircuitBreaker(r),
+        limiter=RateLimiter(r, replicas=s.replica_count),
+        cache=ExactCache(r, ttl_seconds=s.cache_ttl_seconds) if s.cache_ttl_seconds > 0 else None,
         limits=GatewayLimits(
             provider_rate=s.provider_rate,
             provider_burst=s.provider_burst,
@@ -48,9 +63,9 @@ def build_gateway() -> LLMGateway:
         fault_rate=s.fault_injection_rate,
         fault_targets=frozenset(s.fault_injection_targets),
         fault_mode=s.fault_injection_mode,
-        meter=MeteringRecorder(get_session_factory(), _price_table(s.model_prices)),
+        meter=MeteringRecorder(sf, _price_table(s.model_prices)),
         monthly_token_budget=s.tenant_monthly_token_budget,
-        monthly_budget_resolver=TenantDirectory(get_session_factory()).monthly_budget,
+        monthly_budget_resolver=TenantDirectory(sf).monthly_budget,
         request_token_budget=s.request_token_budget,
     )
 

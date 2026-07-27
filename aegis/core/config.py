@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     lease_renew_interval_s: float = Field(default=20.0, gt=0)  # loop 续租间隔
     reaper_interval_s: float = Field(default=30.0, gt=0)  # beat 扫描周期（P2：发现延迟上界≈TTL+周期=90s）
     recovery_limit: int = Field(default=3, ge=1)  # C9：恢复次数上限（P3）
+    approval_scan_interval_s: float = Field(default=60.0, gt=0)  # M3.9：审批到期+对账扫描周期（§4.9 决策 60s）
 
     # —— API 认证（M3.1，P2 拍板：HS256 双密钥窗）——
     jwt_secret: SecretStr = SecretStr("")  # 签发/验签密钥；空=API 认证不可用（auth.py fail-loud）

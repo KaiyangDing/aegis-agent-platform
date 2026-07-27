@@ -1,4 +1,4 @@
-"""mock 系统的进程内通路（M3.7 交付②）：ASGITransport 懒单例。
+"""mock 系统的进程内通路（M3.7 交付②）：ASGITransport 懒单例 + 任务局部安装缝。
 
 拍板Ⅱ：mock 绝不挂载主 app——本客户端是唯一入口。global 手动单例（资源单例
 惯例，00 §2.2 数据访问行）；懒创建=首个调用方所在 event loop 即宿主（API 进程
@@ -24,3 +24,13 @@ def mock_client() -> httpx.AsyncClient:
             base_url="http://mock-backend",
         )
     return _client
+
+
+def set_mock_client(client: httpx.AsyncClient | None) -> None:
+    """任务局部安装缝（M3.9④）：worker 每任务新 event loop，单例的 keep-alive 与
+    底层 app 引擎都绑旧 loop——任务体现建现装、finally 归还 None（aclose 归调用方）。
+    工具面（tools/_shared）只认 mock_client() 单点，穿参会改 L3 工具契约——装缝不改面。
+    前提=--pool=solo 串行执行（06 §4；容器化 prefork 每进程独立同样成立，线程池不支持）。
+    """
+    global _client
+    _client = client

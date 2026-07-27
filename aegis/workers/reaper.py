@@ -39,7 +39,7 @@ ResumeHook = Callable[[str, str, int], Awaitable[None]]
 """恢复钩子：(session_id, lease_owner, lease_generation)——实现负责装配 AgentSpec 并调
 AgentRuntime.resume(spec, session_id, approval_id=None) 续跑。AgentSpec 由 L3 注入
 （03 §1），M2 没有 L3——reaper 不可能自己装配 spec，故只抢租、恢复交给钩子；
-M3.8 注册真实钩子，M2 测试与 kill -9 脚本注入演示钩子。"""
+M3.9 由 workers.hitl 在 import 时注册真实钩子（拍板Ⅰ），M2 测试与 kill -9 脚本注入演示钩子。"""
 
 _resume_hook: ResumeHook | None = None
 
