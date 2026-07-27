@@ -29,6 +29,8 @@
 | `experiment_kill9_recovery.py` | kill -9 → reaper 认领 → 续跑，四断言凭证；结束自清理演示行 | M2.10 | 否 | PG/Redis |
 | `demo_tools_acceptance.py` | 工具五件真实链路三幕：Agent 查单退款 / 双击去重(#6) / 对抗③统一话术；演示订单 upsert 自带+自清理 | M3.7④ | **是**（<¥0.01，单次 Agent run） | PG/Redis + 迁移 + 种子 + `.env` key |
 | `demo_chat_acceptance.py` | 完整客服链路三幕（生产装配原件 create_app）：租户 A 查单退款直执 / **FAQ 守卫实证**（首问直答·跟进问进主 Agent）/ 租户工具面白名单 | M3.8③ | **是**（<¥0.02，≈5 次调用） | PG/Redis + 迁移 + **M3.8③ 版种子** + `.env` key |
+| `demo_hitl.ps1` | **HITL 业务闭环六段**（M3.9 验收面，走 HTTP API+curl.exe）：挂起提示 / 对抗④ 403 / 批准→#8 重跑→执行→续跑（重复决策 409）/ **TOCTOU 否决实证**（批准落锤前订单被退→不执行）/ 超时（时钟注入+生产对账任务体）/ 撤回；会话随机后缀防残留 | M3.9⑤ | **是**（<¥0.05，≈8–12 次调用） | PG/Redis + 迁移 + 种子 + **uvicorn 在跑** + `.env` key |
+| `demo_hitl_helper.py` | demo_hitl.ps1 证据面帮手：seed（订单复位 paid）/ mark-refunded（TOCTOU 制造）/ expire（时钟注入）/ sweep（直调生产 expire_approvals 任务体）/ status（会话·审批·事件·订单四面取证，owner 视角） | M3.9⑤ | 否（sweep 的踢恢复走终止路径零 LLM） | PG/Redis + 迁移 + 种子 |
 
 ## 实验与压测（数字凭证的产地）
 
