@@ -375,12 +375,38 @@ class AgentRuntime:
                 "release 打空：session=%s gen=%s（租约已旁落，事件与置位已由前序完成）", session_id, generation
             )
 
+    async def _find_unattached_approved(self, session_id: str) -> ApprovalRecord | None:
+        """#44 认领判据：该会话最新一张 approved 且未回填 event_id 的审批单。
+
+        event_id 是"批准已兑现"的唯一凭证（attach_event CAS 恰一次）——approved 而
+        无 event_id = 批准与兑现之间崩过。取最新一张：单点挂起不变量下同刻至多
+        一张在途；更老的孤儿（若因历史缺陷存在）不越权代管，留审计人工处理。
+        """
+        async with self._session_factory() as s:
+            return (
+                await s.execute(
+                    select(ApprovalRecord)
+                    .where(
+                        ApprovalRecord.session_id == session_id,
+                        ApprovalRecord.status == ApprovalStatus.APPROVED.value,
+                        ApprovalRecord.event_id.is_(None),
+                    )
+                    .order_by(ApprovalRecord.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
     async def _recover_locked(self, spec: AgentSpec, session_id: str) -> AsyncIterator[AgentEvent]:
-        """崩溃恢复分诊（m2.10 §4.4，approval_id=None 分支）：读事实 → 四支判定 → 续跑。
+        """崩溃恢复分诊（m2.10 §4.4，approval_id=None 分支）：读事实 → 分支判定 → 续跑。
 
         前提：调用方已发现该会话租约过期（reaper steal 后经钩子进来，或人工触发）。
-        四支（按序最多命中一支）：
+        分支（按序最多命中一支）：
         a. 尾事件 loop_terminated —— 上一 run 已收尾只是 T4 没置回：仅修状态，零新事件；
+        a+. 审批认领（#44，M3.9③）—— 会话有 approved 且未 attach_event 的单：批准必须
+            兑现，绝不当未配对弃置。按崩溃窗分三路：从未执行→原语义执行（decided 补写
+            若缺、过 precheck）；write-ahead 悬挂→原幂等键重执行；已有终局→取回落盘
+            结果、只补审计链绝不重执行（新钥匙=真双写）。一律按挂起 run 重建 fill
+            续跑——与 _resume_locked APPROVED 分支同构；
         b. 悬挂 tool_call（有 write-ahead 无终局）—— executor.reexecute 凭原事件 id 重执行
            （恰一把幂等键），结果经 fill 配对进重建序列续跑；
         c. 悬挂 llm_call（I6：无任何 llm_result 配对）—— 作废重发：不补旧事件，
@@ -442,6 +468,94 @@ class AgentRuntime:
         loop, executor = self._assemble(
             spec, tap, tenant_id=tenant_id, user_id=user_id, session_id=session_id, token_seed=token_seed
         )
+
+        # a+ 支（#44 审批认领，M3.9③）：优先于 b/c/d——"已批准未兑现"的单在场时，
+        # 挂起调用的正解是兑现批准而非弃置补话术；不查此单正是 #44 的缺陷本体
+        claim = await self._find_unattached_approved(session_id)
+        claim_req_index: int | None = None
+        if claim is not None:
+            claim_req_index = next(
+                (
+                    i
+                    for i, r in enumerate(rows)
+                    if r.type == EventType.APPROVAL_REQUESTED.value and r.payload.get("approval_id") == claim.id
+                ),
+                None,
+            )
+            if claim_req_index is None:
+                # 单在事件不在：create 与事件 append 之间的缝到不了 approved（T2 未翻无人可批）
+                # ——真到这里=事实源被外力动过；留痕走常规分诊，不越权代管
+                logger.warning("审批单 %s 缺 approval_requested 事件，跳过认领：session=%s", claim.id, session_id)
+        if claim is not None and claim_req_index is not None:
+            claim_args: Mapping[str, Any] = claim.args
+            call_row = next(
+                (
+                    r
+                    for r in rows[claim_req_index + 1 :]
+                    if r.type == EventType.TOOL_CALL.value
+                    and r.payload.get("tool_name") == claim.tool_name
+                    and r.payload.get("args") == dict(claim_args)
+                ),
+                None,
+            )
+            hanging_id = next(iter(open_calls), None)
+            if hanging_id is not None and (call_row is None or call_row.id != hanging_id):
+                raise RuntimeError(f"会话 {session_id} 的悬挂工具与待认领审批不匹配——单写者顺序执行下不可能")
+            if call_row is None:
+                # 窗口一：批准后从未执行（T3 后/decided 后崩）——decided 补写若缺 + 原语义执行
+                decided_present = any(
+                    r.type == EventType.APPROVAL_DECIDED.value and r.payload.get("approval_id") == claim.id
+                    for r in rows[claim_req_index + 1 :]
+                )
+                if not decided_present:
+                    await tap.append(
+                        EventType.APPROVAL_DECIDED,
+                        {"approval_id": claim.id, "approved": True, "operator_id": claim.operator_id},
+                    )
+                veto = None if self._precheck is None else await self._precheck(claim.tool_name, claim_args)
+                if veto is not None:
+                    # D19 同款：否决不终止；单据保持未回填（无执行事件可挂）——再崩会再校验，
+                    # 与 _resume_locked veto 行为一致（已知边界，14i 拍板Ⅳ）
+                    claimed_content = _PRECHECK_VETO_TEMPLATE.format(reason=veto)
+                else:
+                    outcome = await executor.execute(
+                        claim.tool_name, json.dumps(dict(claim_args), ensure_ascii=False), approved=True
+                    )
+                    claimed_content = outcome.content
+                    if outcome.tool_call_id is not None:
+                        await self._approvals.attach_event(claim.id, event_id=outcome.tool_call_id)
+            else:
+                terminal = next(
+                    (
+                        r
+                        for r in rows
+                        if r.type in (EventType.TOOL_RESULT.value, EventType.TOOL_ERROR.value)
+                        and r.payload.get("tool_call_id") == call_row.id
+                    ),
+                    None,
+                )
+                if terminal is None:
+                    # 窗口二：write-ahead 悬挂（执行中途崩）——b 支语义并入认领：原幂等键重执行
+                    outcome = await executor.reexecute(claim.tool_name, claim_args, tool_call_id=call_row.id)
+                    claimed_content = outcome.content
+                elif terminal.type == EventType.TOOL_RESULT.value:
+                    # 窗口三：执行已完成、attach 前崩——绝不重执行（新钥匙=真双写），
+                    # 结果按 _rebuild_working 同款口径取回、只补审计链
+                    claimed_content = terminal.payload.get("injected") or json.dumps(
+                        terminal.payload["result"], ensure_ascii=False, default=str
+                    )
+                else:
+                    claimed_content = f"工具执行失败：{terminal.payload['error']}"
+                await self._approvals.attach_event(claim.id, event_id=call_row.id)
+            for event in tap.drain():
+                yield event
+            user_input, approved_name, approved_args, run_rows = await self._load_suspension(session_id, claim.id)
+            working = _rebuild_working(
+                run_rows, fill_name=approved_name, fill_args=approved_args, fill_content=claimed_content
+            )
+            async for event in self._pump_with_lease(session_id, generation, loop.resume_run(user_input, working)):
+                yield event
+            return
 
         fill_name: str | None = None
         fill_args: Mapping[str, Any] | None = None
