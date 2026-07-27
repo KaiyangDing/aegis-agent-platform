@@ -1,0 +1,96 @@
+{
+  "format_version": 1,
+  "session_id": "l3-iso-rag-549c4a13",
+  "scopes": {
+    "main": [
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 2,
+          "tool_names": [
+            "order_query",
+            "coupon_grant"
+          ],
+          "prompt_sha256": "8e401840ae471deb02402ddd1dc72264ff6380d859ffba45392dd29b44c27b15"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "云"
+          },
+          {
+            "type": "text_delta",
+            "text": "杉生鲜超市"
+          },
+          {
+            "type": "text_delta",
+            "text": "主营生鲜食品与日"
+          },
+          {
+            "type": "text_delta",
+            "text": "用百货，不销售"
+          },
+          {
+            "type": "text_delta",
+            "text": "耳机等电子数码产品，"
+          },
+          {
+            "type": "text_delta",
+            "text": "因此未提供「灵犀降"
+          },
+          {
+            "type": "text_delta",
+            "text": "噪耳机 Pro」的保修"
+          },
+          {
+            "type": "text_delta",
+            "text": "政策。\n\n如您是在"
+          },
+          {
+            "type": "text_delta",
+            "text": "其他平台或品牌渠道"
+          },
+          {
+            "type": "text_delta",
+            "text": "购买该耳机，建议联系"
+          },
+          {
+            "type": "text_delta",
+            "text": "对应品牌官方客服获取准确"
+          },
+          {
+            "type": "text_delta",
+            "text": "的保修信息。\n\n如有"
+          },
+          {
+            "type": "text_delta",
+            "text": "云杉生鲜超市相关"
+          },
+          {
+            "type": "text_delta",
+            "text": "问题（如订单、商品"
+          },
+          {
+            "type": "text_delta",
+            "text": "、配送等），欢迎"
+          },
+          {
+            "type": "text_delta",
+            "text": "随时咨询！"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 489,
+            "completion_tokens": 79,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      }
+    ]
+  }
+}

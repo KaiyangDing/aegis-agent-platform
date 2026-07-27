@@ -1,0 +1,148 @@
+{
+  "format_version": 1,
+  "session_id": "l3-tool-549c4a13",
+  "scopes": {
+    "main": [
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 2,
+          "tool_names": [
+            "order_query",
+            "logistics_query",
+            "refund_apply",
+            "ticket_create"
+          ],
+          "prompt_sha256": "6a9b49fc1a37fc405f7d61b4fb720363c4e668bb16a2598fc147198827f06729"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "我"
+          },
+          {
+            "type": "text_delta",
+            "text": "来"
+          },
+          {
+            "type": "text_delta",
+            "text": "帮您查询"
+          },
+          {
+            "type": "text_delta",
+            "text": "订单 AZ-10"
+          },
+          {
+            "type": "text_delta",
+            "text": "01 的状态。"
+          },
+          {
+            "type": "text_delta",
+            "text": "\n\n"
+          },
+          {
+            "type": "tool_call",
+            "tool_call": {
+              "id": "call_46a9ebd94a3945a99a945b",
+              "name": "order_query",
+              "arguments_json": "{\"order_id\": \"AZ-1001\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 700,
+            "completion_tokens": 40,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "tool_calls"
+          }
+        ]
+      },
+      {
+        "request_digest": {
+          "tier": "standard",
+          "message_count": 4,
+          "tool_names": [
+            "order_query",
+            "logistics_query",
+            "refund_apply",
+            "ticket_create"
+          ],
+          "prompt_sha256": "a8437feee20a9f59b559d3bef08ad8e05a55cf42b5d43ffc19c4f5231c1a063b"
+        },
+        "chunks": [
+          {
+            "type": "text_delta",
+            "text": "订单"
+          },
+          {
+            "type": "text_delta",
+            "text": " AZ"
+          },
+          {
+            "type": "text_delta",
+            "text": "-10"
+          },
+          {
+            "type": "text_delta",
+            "text": "01 状态为"
+          },
+          {
+            "type": "text_delta",
+            "text": "「已支付」，实"
+          },
+          {
+            "type": "text_delta",
+            "text": "付金额 168"
+          },
+          {
+            "type": "text_delta",
+            "text": ".00 元，"
+          },
+          {
+            "type": "text_delta",
+            "text": "商品为：灵犀降噪"
+          },
+          {
+            "type": "text_delta",
+            "text": "耳机 Pro（1件"
+          },
+          {
+            "type": "text_delta",
+            "text": "），下单时间为 2"
+          },
+          {
+            "type": "text_delta",
+            "text": "026-07"
+          },
+          {
+            "type": "text_delta",
+            "text": "-27。\n\n如需查询"
+          },
+          {
+            "type": "text_delta",
+            "text": "物流信息或有其他需求"
+          },
+          {
+            "type": "text_delta",
+            "text": "，请随时告诉我。"
+          },
+          {
+            "type": "usage",
+            "model": "qwen-plus",
+            "prompt_tokens": 864,
+            "completion_tokens": 68,
+            "cached": false
+          },
+          {
+            "type": "stop",
+            "reason": "end_turn"
+          }
+        ]
+      }
+    ]
+  }
+}

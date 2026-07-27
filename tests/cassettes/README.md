@@ -44,6 +44,8 @@
 
 `<用途>_<场景>.json` 小写下划线，如 `minimal_demo.json`、`long_dialog.json`
 （真实录制类资产名**稳定不带日期/轮数**——M4.3 重录 diff 靠稳定名成为评审物，plans/m2.11 D1）。
+**L3 五盘落 `l3/` 子目录**（M3.11 拍板：成组管理、M4.3 按目录消费），命名约定不变；
+重录入口 `scripts/record_l3_cassettes.py`（自检先于落盘、五盘全过才统一落盘）。
 
 ## 6. M2 基准会话集登记表（M2.11 落定；04"录制基准会话集"收窄至此；M3.11 在本表追加 L3 行）
 
@@ -63,4 +65,8 @@ M4.3 CI 回归的输入范围以本表为准。逐行核对承载物存在且可
 | gateway_rejected | gateway_rejected（七类之外，零兜底话术 C6） | 内联存根 | `tests/runtime/test_loop_gateway_errors.py`（M2.7） |
 | tool_seq_write_approval_resume | 写工具→NEEDS_APPROVAL→批准→单入口恢复续跑 | 内联夹具 | `tests/runtime/test_suspend_resume.py`（M2.9） |
 | tool_seq_fail_streak_disable | 同一工具连败 2 次本轮禁用→改道 | 内联夹具 | `tests/runtime/test_executor_exec.py`（M2.4） |
-| L3 隔离/预算行为用例 | ——（跨租户隔离、预算行为） | 真实录制 | **M3.11（明确不在本步，届时在本表追加）** |
+| l3_isolation_cross_tenant_rag | completed + B 问 A 专有知识零泄漏（检索空集来源=阈值拒答，fail-open 空集不入带） | 真实录制 | `l3/isolation_cross_tenant_rag.json` + `tests/apps/test_l3_cassette_smoke.py`（行为断言主体 M4.3 接手） |
+| l3_isolation_cross_user_refund | completed + 工具统一话术拒绝全程（对抗③；100 元刻意低于阈值走归属面非审批面） | 真实录制 | `l3/isolation_cross_user_refund.json` + 冒烟载入 |
+| l3_budget_token_exceeded | token_budget_exceeded（L3 租户配置注入口径；main 道**零条目**=闸门 #3 预检零调用） | 真实录制（零 LLM 条目） | `l3/budget_token_exceeded.json` + 冒烟端到端回放 |
+| l3_hitl_approve_resume | 挂起（无终止事件）→ decide → resume completed + 订单落 refunded | 真实录制 | `l3/hitl_approve_resume.json` + 冒烟载入（挂起/续跑双段条目形状） |
+| l3_tool_roundtrip | completed + 工具序列恰 [order_query]（L3 生产装配正例） | 真实录制 | `l3/tool_roundtrip_order_query.json` + 冒烟全链回放（FakeGateway×mock 后端） |

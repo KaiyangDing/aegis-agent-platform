@@ -39,6 +39,7 @@
 | `experiment_fault_injection.py` | 30% 注入 ×1000 韧性实测 + 熔断演示（M1 毕业实验） | M1 | 否（打桩） | PG/Redis |
 | `loadtest_ratelimit.py` | 限流精度压测（时序断言不进 CI，以本脚本报告为准） | M1 | 否 | Redis（db9） |
 | `record_long_dialog.py` | 40 轮长对话真实录制（M2 真实调用例外①）；六道自检先于落盘 | M2.11 | **是**（预算写死） | 全套 + `.env` key |
+| `record_l3_cassettes.py` | L3 行为五盘 cassette 录制（隔离×2/预算触发/HITL 批准续跑/工具正例；自检先于落盘、五盘全过才统一落盘；产物 `tests/cassettes/l3/` + `reports/m3_l3_recording.txt`——M4.3 CI 回归输入） | M3.11③ | **是**（预算写死 40 调用/10 万 token/¥2，实跑 <¥0.10） | 全套 + 种子 + 语料已摄取 + `.env` key |
 | `calibrate_retrieval_threshold.py` | 检索阈值真实语料校准（§3.5 留白定值；首测 0.35 维持、分离窗 [0.31,0.45]；M3.11 语料扩容后复跑复核。新前缀族 calibrate_=数值留白定值工种） | M3.5④ | **是**（<¥0.001，查询清单钉死上限） | PG + 语料已摄取 + `.env` key |
 | `measure_intent_latency.py` | 意图分类延迟实测（四类探针+缓存命中重复问；首测新鲜 901–2357 ms/命中 8 ms/4-4 全中；M3.12 复测同口径。新前缀族 measure_=轻量延迟实测工种，M3.12 性能口径/M5.2 口径②扩展位） | M3.6② | **是**（<¥0.001，探针清单钉死上限） | PG/Redis + 种子 + `.env` key |
 
