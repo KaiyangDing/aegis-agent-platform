@@ -31,6 +31,7 @@ from aegis.runtime.runtime import AgentRuntime, GatewayLike
 _CHAT_PAGE = Path(__file__).resolve().parents[1] / "web" / "chat.html"
 """演示聊天页（M3.10④，01 §5 单文件无构建链）：Path(__file__) 锚定不依赖 cwd（07 §4 第 7 条）。"""
 
+
 def create_app(
     settings: Settings | None = None,
     session_factory: SessionFactory | None = None,
