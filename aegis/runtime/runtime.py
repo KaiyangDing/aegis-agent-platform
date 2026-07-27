@@ -61,6 +61,10 @@ PrecheckHook = Callable[[str, Mapping[str, Any]], Awaitable[str | None]]
 """批准后前置校验挂点（00 §10.1 #8）：(tool_name, args 快照) -> None=通过 / str=拒绝原因。
 校验逻辑（订单状态/可退余额）M3.9 注入；M2 默认 None=全通过。"""
 
+TextSink = Callable[[str], Awaitable[None]]
+"""逐 token 通道缝（M3.10 拍板Ⅱ）：OutputGuard 放行的可见文本段推送口。
+观察者不改变事实：sink 只影响通道推送，事件流与其在场与否无关；sink 异常由
+loop 降级消化（停止推送、run 照常）。L3 的 SSE 通道（M3.10②）经此接线。"""
 
 _SUMMARIZE_PROMPT = (
     "请将下面的客服对话内容压缩为要点摘要：保留订单号、金额、时间、用户诉求与已确认的结论，"
@@ -230,14 +234,22 @@ class AgentRuntime:
         self._leases = LeaseStore(session_factory)
         self._lease_owner = default_lease_owner()
 
-    async def run(self, spec: AgentSpec, session_id: str, user_input: str) -> AsyncIterator[AgentEvent]:
-        """驱动一次完整 Agent 循环。本签名是 M2 的对外契约，定死不再动。"""
+    async def run(
+        self, spec: AgentSpec, session_id: str, user_input: str, *, text_sink: TextSink | None = None
+    ) -> AsyncIterator[AgentEvent]:
+        """驱动一次完整 Agent 循环。位置参数签名是 M2 的对外契约不动；
+        text_sink 为 M3.10 拍板Ⅱ additive 通道缝（缺省 None=原行为，M3.8 拍板Ⅱ 同款程序）。"""
         async with _maybe_lock(self._lock, session_id):
-            async for event in self._run_locked(spec, session_id, user_input):
+            async for event in self._run_locked(spec, session_id, user_input, text_sink=text_sink):
                 yield event
 
     async def resume(
-        self, spec: AgentSpec, session_id: str, approval_id: str | None = None
+        self,
+        spec: AgentSpec,
+        session_id: str,
+        approval_id: str | None = None,
+        *,
+        text_sink: TextSink | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """恢复单入口："先取会话锁再恢复"（03 §5）。四种审批结局统一分诊。
 
@@ -246,10 +258,10 @@ class AgentRuntime:
         """
         async with _maybe_lock(self._lock, session_id):
             if approval_id is None:
-                async for event in self._recover_locked(spec, session_id):
+                async for event in self._recover_locked(spec, session_id, text_sink=text_sink):
                     yield event
             else:
-                async for event in self._resume_locked(spec, session_id, approval_id):
+                async for event in self._resume_locked(spec, session_id, approval_id, text_sink=text_sink):
                     yield event
 
     async def _identity_and_seed(self, session_id: str) -> tuple[str, str, int]:
@@ -278,7 +290,15 @@ class AgentRuntime:
         return identity[0], identity[1], token_seed
 
     def _assemble(
-        self, spec: AgentSpec, tap: _Tap, *, tenant_id: str, user_id: str, session_id: str, token_seed: int
+        self,
+        spec: AgentSpec,
+        tap: _Tap,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        token_seed: int,
+        text_sink: TextSink | None = None,
     ) -> tuple[AgentLoop, ToolExecutor]:
         """组装（run 与 resume 共用）：registry/executor/builder/guards/loop 一次备齐。"""
         from aegis.runtime.replay import scoped_view  # 延迟 import 破环（replay 顶层引用本模块）
@@ -318,10 +338,13 @@ class AgentRuntime:
             guards=Guardrails(classify=classify),
             approvals=self._approvals,
             session_state=self._session_state,
+            text_sink=text_sink,
         )
         return loop, executor
 
-    async def _run_locked(self, spec: AgentSpec, session_id: str, user_input: str) -> AsyncIterator[AgentEvent]:
+    async def _run_locked(
+        self, spec: AgentSpec, session_id: str, user_input: str, *, text_sink: TextSink | None = None
+    ) -> AsyncIterator[AgentEvent]:
         run_id = self._run_id_factory()
         tenant_id, user_id, token_seed = await self._identity_and_seed(session_id)
         # T1（M2.9/D20）：循环启动前 idle→running；失败=会话在挂起/运行中——
@@ -336,7 +359,13 @@ class AgentRuntime:
         writer = await EventWriter.open(self._session_factory, session_id, run_id)
         tap = _Tap(writer)
         loop, _ = self._assemble(
-            spec, tap, tenant_id=tenant_id, user_id=user_id, session_id=session_id, token_seed=token_seed
+            spec,
+            tap,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            token_seed=token_seed,
+            text_sink=text_sink,
         )
         async for event in self._pump_with_lease(session_id, generation, loop.run(user_input)):
             yield event
@@ -396,7 +425,9 @@ class AgentRuntime:
                 )
             ).scalar_one_or_none()
 
-    async def _recover_locked(self, spec: AgentSpec, session_id: str) -> AsyncIterator[AgentEvent]:
+    async def _recover_locked(
+        self, spec: AgentSpec, session_id: str, *, text_sink: TextSink | None = None
+    ) -> AsyncIterator[AgentEvent]:
         """崩溃恢复分诊（m2.10 §4.4，approval_id=None 分支）：读事实 → 分支判定 → 续跑。
 
         前提：调用方已发现该会话租约过期（reaper steal 后经钩子进来，或人工触发）。
@@ -466,7 +497,13 @@ class AgentRuntime:
         writer = await EventWriter.open(self._session_factory, session_id, run_id)
         tap = _Tap(writer)
         loop, executor = self._assemble(
-            spec, tap, tenant_id=tenant_id, user_id=user_id, session_id=session_id, token_seed=token_seed
+            spec,
+            tap,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            token_seed=token_seed,
+            text_sink=text_sink,
         )
 
         # a+ 支（#44 审批认领，M3.9③）：优先于 b/c/d——"已批准未兑现"的单在场时，
@@ -601,7 +638,9 @@ class AgentRuntime:
         )
         return user_input, req["tool_name"], req["args"], run_rows
 
-    async def _resume_locked(self, spec: AgentSpec, session_id: str, approval_id: str) -> AsyncIterator[AgentEvent]:
+    async def _resume_locked(
+        self, spec: AgentSpec, session_id: str, approval_id: str, *, text_sink: TextSink | None = None
+    ) -> AsyncIterator[AgentEvent]:
         async with self._session_factory() as s:
             approval = (
                 await s.execute(select(ApprovalRecord).where(ApprovalRecord.id == approval_id))
@@ -625,7 +664,13 @@ class AgentRuntime:
         if approval.status == ApprovalStatus.APPROVED.value:
             tenant_id, user_id, token_seed = await self._identity_and_seed(session_id)
             loop, executor = self._assemble(
-                spec, tap, tenant_id=tenant_id, user_id=user_id, session_id=session_id, token_seed=token_seed
+                spec,
+                tap,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+                token_seed=token_seed,
+                text_sink=text_sink,
             )
             await tap.append(
                 EventType.APPROVAL_DECIDED,

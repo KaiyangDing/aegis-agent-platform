@@ -51,7 +51,9 @@ class _SpyRuntime(AgentRuntime):
         self.calls: list[tuple[str, str | None]] = []
         self.script: list[AgentEvent] = []
 
-    async def resume(self, spec, session_id, approval_id=None):
+    async def resume(self, spec, session_id, approval_id=None, *, text_sink=None):
+        # text_sink：基类 M3.10① 增的 keyword 缝——覆写必须收下（Liskov/mypy [override]），
+        # 审批端点是同步 JSON 消费者不传 sink，此处不使用
         self.calls.append((session_id, approval_id))
         for event in self.script:
             yield event

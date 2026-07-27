@@ -14,7 +14,7 @@ import json
 import logging
 import time
 from collections import deque
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -48,6 +48,7 @@ from aegis.runtime.guardrails import (
     SAFE_REPLY,
     UNTRUSTED_NOTICE,
     Guardrails,
+    OutputGuard,
     entry_audit_payload,
     output_audit_payload,
     wrap_untrusted,
@@ -181,6 +182,7 @@ class AgentLoop:
         approvals: ApprovalStore,
         session_state: SessionStateStore,
         guards: Guardrails | None = None,
+        text_sink: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._spec = spec
         self._gateway = gateway  # 已是 main 作用域视图（D15：摘要走各自的道，勿混）
@@ -192,6 +194,11 @@ class AgentLoop:
         self._approvals = approvals
         self._session_state = session_state
         self._guards = guards if guards is not None else Guardrails()  # 未注入 = 纯规则库（分类器归组装方）
+        # M3.10 拍板Ⅱ：逐 token 通道缝（None=无通道，M2 形态逐字节不变）；
+        # stream_guard/stream_visible 是"当前 LLM 调用"作用域的流中状态，每次 _llm_step 重置
+        self._text_sink = text_sink
+        self._stream_guard: OutputGuard | None = None
+        self._stream_visible = ""
         # M2.8 D5：不可信包裹的 system 层声明恒随 prompt——此处拼接一次，spec.system_prompt
         # 本体不动；FakeGateway 匹配键不含 prompt 哈希，既有 cassette 不失配
         self._system_prompt = f"{spec.system_prompt}\n\n{UNTRUSTED_NOTICE}"
@@ -427,6 +434,8 @@ class AgentLoop:
 
         闸门 #2 的 LLM 半边就是 deadline_s 传播（C1/I2）：不包 asyncio.timeout，
         嵌套约束由 L1 三段超时（connect 5s / 首块 25s / 空闲 30s）与 deadline 机制保证。
+        M3.10 拍板Ⅱ：text_sink 在场时本调用自建 OutputGuard 逐帧 feed（08 §5.10/D14
+        预埋的兑现），放行段实时推送；sink 缺席=零守卫零推送，与 M2.7 形态逐字节一致。
         """
         request = LLMRequest(
             tier=self._spec.model_tier,
@@ -437,6 +446,17 @@ class AgentLoop:
             deadline_s=self._policy.llm_step_timeout_s,
             max_tokens=self._spec.context_config.output_reserve,  # D3：输出上限即余量层预算
         )
+        guard: OutputGuard | None = None
+        if self._text_sink is not None:
+            # 每次 LLM 调用一个实例（guardrails.py:411"每个纯文本回复出口新建一个"）；
+            # 参数与 _finish_text 聚合模式同源——不变量保证两模式行为一致
+            guard = self._guards.output_guard(
+                system_prompt=self._spec.system_prompt,
+                tool_names=[spec.name for spec in self._tool_specs],
+                owned_values=self._spec.owned_values,
+            )
+        self._stream_guard = guard
+        self._stream_visible = ""
         parts: list[str] = []
         calls: list[ToolCall] = []
         usage: UsageChunk | None = None
@@ -446,6 +466,11 @@ class AgentLoop:
             async for chunk in stream:
                 if isinstance(chunk, TextDelta):
                     parts.append(chunk.text)
+                    if guard is not None:
+                        released = guard.feed(chunk.text)
+                        if released:
+                            self._stream_visible += released
+                            await self._push_text(released)
                 elif isinstance(chunk, ToolCallChunk):
                     calls.append(chunk.tool_call)
                 elif isinstance(chunk, UsageChunk):
@@ -473,6 +498,17 @@ class AgentLoop:
             usage_completion=usage.completion_tokens if usage else 0,
             cached=bool(usage and usage.cached),
         )
+
+    async def _push_text(self, segment: str) -> None:
+        """通道推送单点（M3.10 拍板Ⅱ）：观察者绝不拖垮事实生产——sink 异常降级为
+        本 run 停止推送（warning 留痕），事件流照常；sink=None 时恒 no-op。"""
+        if self._text_sink is None:
+            return
+        try:
+            await self._text_sink(segment)
+        except Exception:
+            logger.warning("text_sink 推送失败，本 run 降级为无通道推送", exc_info=True)
+            self._text_sink = None
 
     async def _run_tools(self, turn: _LLMTurn) -> TerminationReason | _Suspended | None:
         """工具分支（D20：顺序逐个执行，无并行）：闸门 #4/#6 检查点 + D6 幻觉记账 + 五结局回填。
@@ -576,21 +612,32 @@ class AgentLoop:
         self._turns.append(Message(role="tool", content=content, tool_call_id=call.id))
 
     async def _finish_text(self, turn: _LLMTurn) -> None:
-        """文本收尾单点（M2.8 挂点③）：出口守卫聚合检查 + 终局复检，然后才写 assistant_message。
+        """文本收尾单点（M2.8 挂点③；M3.10 逐帧接线兑现）。
 
-        M2.7 实装为聚合后单发（08 §5.10）——OutputGuard 确定性不变量（逐字符 ≡ 整段）
-        保证聚合 feed 与 M3.10 逐帧 feed 行为一致；_llm_step 消费结构零改动（流中
-        提前退出会丢 ToolCallChunk/UsageChunk，工具轮误判 + 计量蒸发）。
+        sink 缺席：现行聚合模式逐字节不变（新建 guard、整段 feed+flush——08 §5.10）。
+        sink 在场：复用 _llm_step 的流中 guard——OutputGuard"逐字符≡整段"不变量保证
+        两模式 visible/hit 一致，**事件面绝不因观察者存在而改变**。通道与事件的两处
+        已知分岔（14j 拍板Ⅱ 显式接受）：final_check 命中时已推流不可撤回（事件存
+        SAFE_REPLY 为准，GET 重连整条重推校正）；流中命中时通道总量 ≡ 事件内容。
         """
-        guard = self._guards.output_guard(
-            # 片段集用 spec 原文：UNTRUSTED_NOTICE 是公开机制说明，模型复述无害不设防
-            system_prompt=self._spec.system_prompt,
-            tool_names=[spec.name for spec in self._tool_specs],
-            owned_values=self._spec.owned_values,
-        )
-        visible = guard.feed(turn.text) + guard.flush()
+        guard = self._stream_guard
+        if guard is None:
+            guard = self._guards.output_guard(
+                # 片段集用 spec 原文：UNTRUSTED_NOTICE 是公开机制说明，模型复述无害不设防
+                system_prompt=self._spec.system_prompt,
+                tool_names=[spec.name for spec in self._tool_specs],
+                owned_values=self._spec.owned_values,
+            )
+            visible = guard.feed(turn.text) + guard.flush()
+        else:
+            tail = guard.flush()  # 命中后恒返空串（命中即终态），无需分支
+            if tail:
+                self._stream_visible += tail
+                await self._push_text(tail)
+            visible = self._stream_visible
         if guard.hit is not None:
             # 流中命中（D11 止损）：已放行前缀 + 安全话术，命中句起全部丢弃
+            await self._push_text(SAFE_REPLY)
             await self._events.append(EventType.GUARDRAIL_TRIGGERED, output_audit_payload(guard.hit, stage="stream"))
             await self._events.append(
                 EventType.ASSISTANT_MESSAGE,
@@ -599,7 +646,8 @@ class AgentLoop:
             return
         final_hits = guard.final_check(visible)
         if final_hits:
-            # 终局命中：M2 时点 assistant_message 尚未写出，可整条替换（D11）
+            # 终局命中：事件整条替换（D11）；通道已推部分不可撤回，补推安全话术止损
+            await self._push_text(SAFE_REPLY)
             await self._events.append(EventType.GUARDRAIL_TRIGGERED, output_audit_payload(final_hits[0], stage="final"))
             await self._events.append(
                 EventType.ASSISTANT_MESSAGE,

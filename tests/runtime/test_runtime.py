@@ -25,10 +25,17 @@ def test_real_gateway_structurally_satisfies_protocol() -> None:
 
 
 def test_run_signature_unchanged() -> None:
-    """签名快照（全仓开 future annotations，注解在运行时是字符串——按字符串断言）。"""
+    """签名快照（全仓开 future annotations，注解在运行时是字符串——按字符串断言）。
+
+    M2 位置参数契约不动；M3.10 拍板Ⅱ 增 keyword-only text_sink additive 缝——
+    钉子随契约演进：位置前缀逐项锁死 + 缝必须 KEYWORD_ONLY 且缺省 None
+    （防"顺手升位置参数"破坏既有调用方；缺省 None=观察者缺席即 M2 行为）。
+    """
     sig = inspect.signature(AgentRuntime.run)
-    assert list(sig.parameters) == ["self", "spec", "session_id", "user_input"]
+    assert list(sig.parameters) == ["self", "spec", "session_id", "user_input", "text_sink"]
     assert sig.parameters["spec"].annotation == "AgentSpec"
     assert sig.parameters["session_id"].annotation == "str"
     assert sig.parameters["user_input"].annotation == "str"
+    assert sig.parameters["text_sink"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert sig.parameters["text_sink"].default is None
     assert sig.return_annotation == "AsyncIterator[AgentEvent]"
