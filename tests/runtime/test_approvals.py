@@ -89,8 +89,11 @@ async def test_expire_due_flips_only_due_pending(db_session_factory) -> None:
     await _create(store, "ap-future", hours=10.0)  # 未到期 pending → 不动
     await _create(store, "ap-gone", hours=-1.0)  # 已到期但已撤回 → 不动
     await store.cancel("ap-gone")  # 过期单允许撤回（cancel 不查过期）
+    # 过滤式断言（M2.10 教训）：expire_due 是全表扫描，本地库已提交的真实残留单
+    # 也会入列——全局相等断言天生脆，只对本测试创建的三单下结论
     flipped = await store.expire_due()
-    assert flipped == ["ap-due"]
+    assert "ap-due" in flipped
+    assert "ap-future" not in flipped and "ap-gone" not in flipped
     assert (await _row(db_session_factory, "ap-due")).status == ApprovalStatus.EXPIRED
     assert (await _row(db_session_factory, "ap-future")).status == ApprovalStatus.PENDING
     assert (await _row(db_session_factory, "ap-gone")).status == ApprovalStatus.CANCELLED
@@ -100,7 +103,7 @@ async def test_expire_due_with_injected_clock(db_session_factory) -> None:
     """可注入时钟（C7）：不等真实时间走到 expires_at，把"未来的现在"递进去即触发。"""
     store = ApprovalStore(db_session_factory)
     await _create(store, "ap-7", hours=1.0)  # 对真实时钟而言未到期
-    assert await store.expire_due() == []  # DB 时钟视角：还活着
+    assert "ap-7" not in await store.expire_due()  # DB 时钟视角：还活着（过滤式，同上条注记）
     flipped = await store.expire_due(now=datetime.now(UTC) + timedelta(hours=2))
-    assert flipped == ["ap-7"]
+    assert "ap-7" in flipped
     assert (await _row(db_session_factory, "ap-7")).status == ApprovalStatus.EXPIRED
