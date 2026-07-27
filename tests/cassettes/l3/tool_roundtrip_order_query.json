@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "session_id": "l3-tool-549c4a13",
+  "session_id": "l3-tool-13c77124",
   "scopes": {
     "main": [
       {
@@ -13,28 +13,24 @@
             "refund_apply",
             "ticket_create"
           ],
-          "prompt_sha256": "6a9b49fc1a37fc405f7d61b4fb720363c4e668bb16a2598fc147198827f06729"
+          "prompt_sha256": "fd6ce4e8dbdf60cab494cd03281eb80fa12a050ebe3a802b73e504130ddb68c0"
         },
         "chunks": [
           {
             "type": "text_delta",
-            "text": "我"
+            "text": "正在"
           },
           {
             "type": "text_delta",
-            "text": "来"
+            "text": "为您查询订单"
           },
           {
             "type": "text_delta",
-            "text": "帮您查询"
+            "text": " AZ-1001"
           },
           {
             "type": "text_delta",
-            "text": "订单 AZ-10"
-          },
-          {
-            "type": "text_delta",
-            "text": "01 的状态。"
+            "text": " 的状态，请稍候。"
           },
           {
             "type": "text_delta",
@@ -43,7 +39,7 @@
           {
             "type": "tool_call",
             "tool_call": {
-              "id": "call_46a9ebd94a3945a99a945b",
+              "id": "call_5482d3af7e444a389c2578",
               "name": "order_query",
               "arguments_json": "{\"order_id\": \"AZ-1001\"}"
             }
@@ -51,8 +47,8 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 700,
-            "completion_tokens": 40,
+            "prompt_tokens": 741,
+            "completion_tokens": 41,
             "cached": false
           },
           {
@@ -71,7 +67,7 @@
             "refund_apply",
             "ticket_create"
           ],
-          "prompt_sha256": "a8437feee20a9f59b559d3bef08ad8e05a55cf42b5d43ffc19c4f5231c1a063b"
+          "prompt_sha256": "2d55c4bb526972af29cc0b6bf0f8876bb03d40580d7b22a6d5b6ef65f34fec6b"
         },
         "chunks": [
           {
@@ -88,7 +84,7 @@
           },
           {
             "type": "text_delta",
-            "text": "01 状态为"
+            "text": "01 当前状态为"
           },
           {
             "type": "text_delta",
@@ -133,8 +129,8 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 864,
-            "completion_tokens": 68,
+            "prompt_tokens": 906,
+            "completion_tokens": 69,
             "cached": false
           },
           {

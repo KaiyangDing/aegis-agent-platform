@@ -42,6 +42,8 @@
 | `record_l3_cassettes.py` | L3 行为五盘 cassette 录制（隔离×2/预算触发/HITL 批准续跑/工具正例；自检先于落盘、五盘全过才统一落盘；产物 `tests/cassettes/l3/` + `reports/m3_l3_recording.txt`——M4.3 CI 回归输入） | M3.11③ | **是**（预算写死 40 调用/10 万 token/¥2，实跑 <¥0.10） | 全套 + 种子 + 语料已摄取 + `.env` key |
 | `calibrate_retrieval_threshold.py` | 检索阈值真实语料校准（§3.5 留白定值；首测 0.35 维持、分离窗 [0.31,0.45]；M3.11 语料扩容后复跑复核。新前缀族 calibrate_=数值留白定值工种） | M3.5④ | **是**（<¥0.001，查询清单钉死上限） | PG + 语料已摄取 + `.env` key |
 | `measure_intent_latency.py` | 意图分类延迟实测（四类探针+缓存命中重复问；首测新鲜 901–2357 ms/命中 8 ms/4-4 全中；M3.12 复测同口径。新前缀族 measure_=轻量延迟实测工种，M3.12 性能口径/M5.2 口径②扩展位） | M3.6② | **是**（<¥0.001，探针清单钉死上限） | PG/Redis + 种子 + `.env` key |
+| `perf_m3.py` | M3 性能两口径实测（00 §7.2 第 2 条）：缓存命中二连发 <50ms（3 组中位）/未命中首 token standard 档 20 样本 P50/P95 <2.5s；超设计值=修正记录不改口径；产出进 reports/m3_acceptance.md | M3.12② | **是**（≤26 调用 <¥0.05，上限 30/¥0.50 写死） | PG/Redis + 种子 + `.env` key |
+| `fallback_rate_m3.py` | 知识库外兜底触发率实测（00 §7.2 第 4 条）：分母=seed.jsonl okb 5 条（I1）、主 Agent 生产装配直驱+真实检索；判定=兜底信号集（record 脚本同源）∨ ticket_create；≥95%，未触发逐条归因全文 | M3.12② | **是**（≈5–10 调用 <¥0.02，上限 15/¥0.20 写死） | PG/Redis + 迁移 + 种子 + 语料已摄取 + `.env` key |
 
 ## 对账与调试
 

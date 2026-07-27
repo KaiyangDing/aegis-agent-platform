@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "session_id": "l3-iso-rag-549c4a13",
+  "session_id": "l3-iso-rag-13c77124",
   "scopes": {
     "main": [
       {
@@ -11,32 +11,20 @@
             "order_query",
             "coupon_grant"
           ],
-          "prompt_sha256": "8e401840ae471deb02402ddd1dc72264ff6380d859ffba45392dd29b44c27b15"
+          "prompt_sha256": "4a67e8acf22a006f6ca59a69d54dc4fc23bd61585f795ac5b082ba2fdb2167c9"
         },
         "chunks": [
           {
             "type": "text_delta",
-            "text": "云"
+            "text": "关于"
           },
           {
             "type": "text_delta",
-            "text": "杉生鲜超市"
+            "text": "「"
           },
           {
             "type": "text_delta",
-            "text": "主营生鲜食品与日"
-          },
-          {
-            "type": "text_delta",
-            "text": "用百货，不销售"
-          },
-          {
-            "type": "text_delta",
-            "text": "耳机等电子数码产品，"
-          },
-          {
-            "type": "text_delta",
-            "text": "因此未提供「灵犀降"
+            "text": "灵犀降"
           },
           {
             "type": "text_delta",
@@ -44,45 +32,93 @@
           },
           {
             "type": "text_delta",
-            "text": "政策。\n\n如您是在"
+            "text": "政策，我查询了"
           },
           {
             "type": "text_delta",
-            "text": "其他平台或品牌渠道"
+            "text": "云杉生鲜超市的知识"
           },
           {
             "type": "text_delta",
-            "text": "购买该耳机，建议联系"
+            "text": "库和可用工具，但"
           },
           {
             "type": "text_delta",
-            "text": "对应品牌官方客服获取准确"
+            "text": "未找到该商品的相关"
           },
           {
             "type": "text_delta",
-            "text": "的保修信息。\n\n如有"
+            "text": "信息。\n\n云杉生鲜超市"
           },
           {
             "type": "text_delta",
-            "text": "云杉生鲜超市相关"
+            "text": "主要经营生鲜食品、日"
           },
           {
             "type": "text_delta",
-            "text": "问题（如订单、商品"
+            "text": "用百货等品类，暂"
           },
           {
             "type": "text_delta",
-            "text": "、配送等），欢迎"
+            "text": "无「灵犀降"
           },
           {
             "type": "text_delta",
-            "text": "随时咨询！"
+            "text": "噪耳机 Pro」这一"
+          },
+          {
+            "type": "text_delta",
+            "text": "电子数码类商品的销售"
+          },
+          {
+            "type": "text_delta",
+            "text": "记录或保修说明。\n\n建议"
+          },
+          {
+            "type": "text_delta",
+            "text": "您：\n- 确认"
+          },
+          {
+            "type": "text_delta",
+            "text": "该商品是否由云"
+          },
+          {
+            "type": "text_delta",
+            "text": "杉生鲜超市官方渠道"
+          },
+          {
+            "type": "text_delta",
+            "text": "销售；\n- 或联系该"
+          },
+          {
+            "type": "text_delta",
+            "text": "品牌官方客服获取准确"
+          },
+          {
+            "type": "text_delta",
+            "text": "的保修政策。\n\n如需"
+          },
+          {
+            "type": "text_delta",
+            "text": "进一步协助，请提供订单"
+          },
+          {
+            "type": "text_delta",
+            "text": "号或说明购买渠道，"
+          },
+          {
+            "type": "text_delta",
+            "text": "我可帮您核实"
+          },
+          {
+            "type": "text_delta",
+            "text": "。"
           },
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 489,
-            "completion_tokens": 79,
+            "prompt_tokens": 530,
+            "completion_tokens": 123,
             "cached": false
           },
           {
