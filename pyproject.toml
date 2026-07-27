@@ -56,6 +56,10 @@ explicit_package_bases = true   # ← 新增：按目录路径推导模块名，
 module = "celery.*"             # celery 5.5 无 py.typed（m2.10 §7 陷阱 5，实测后加）
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "asyncpg.*"            # asyncpg 无 py.typed（M3.10③ LISTEN 首次直接 import，实测后加——celery 同款）
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"          # async def 的测试函数自动被识别，不用逐个加装饰器

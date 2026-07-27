@@ -1,16 +1,18 @@
-"""FastAPI 入口（M3.1/M3.2/M3.4/M3.8/M3.9）：create_app 工厂——组装在边缘（app.state 挂共享资源）。
+"""FastAPI 入口（M3.1/M3.2/M3.4/M3.8/M3.9/M3.10）：create_app 工厂——组装在边缘。
 
 uvicorn 启动（仓库根）：uv run uvicorn aegis.api.main:create_app --factory
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI
 
-from aegis.api import approvals, chat, kb, usage
+from aegis.api import approvals, chat, events_view, kb, stream, usage
+from aegis.api.notify import EventNotifier
 from aegis.api.ratelimit import InboundLimiterLike
 from aegis.apps.support.rag.retrieve import RetrievalProvider, Retriever
 from aegis.apps.support.revalidate import build_precheck
@@ -34,35 +36,47 @@ def create_app(
     gateway: GatewayLike | None = None,
     chat_service: ChatService | None = None,
     approvals_lookup: SessionFactory | None = None,
+    notifier: EventNotifier | None = None,
+    msg_redis: aioredis.Redis | None = None,
 ) -> FastAPI:
-    """应用工厂：八件可注入（测试传替身；生产缺省在此组装——组装在边缘的唯一聚合点）。
+    """应用工厂：十件可注入（测试传替身；生产缺省在此组装——组装在边缘的唯一聚合点）。
 
-    生产缺省链：真网关 build_gateway() + 会话锁 build_session_lock()（M2.9 定案)
-    + **检索槽位生产接线**（M3.8 拍板Ⅱ：RetrievalProvider→AgentRuntime 受控缝，
-    #7 收尾）+ 前置校验 build_precheck（M3.9①，#8）+ 入站限流复用出站
-    RateLimiter（D6）+ 摄取入队 kb.build_enqueue + ChatService 编排层（M3.8②）
-    + **审批授权查读 owner 工厂**（M3.9② 拍板Ⅲ：RLS 下 operator 上下文看不见
-    他租单，403/404 判定需要平台视角——仅 approvals 端点的授权读用它，
-    判定后回 tenant_context 走 app 工厂）。
+    生产缺省链：真网关+会话锁+检索接线（M3.8 拍板Ⅱ）+前置校验（M3.9①）+入站限流
+    +摄取入队+ChatService（M3.8②）+审批授权查读 owner 工厂（M3.9② 拍板Ⅲ）
+    +**EventNotifier LISTEN 随 lifespan 起停**（M3.10③；测试 ASGITransport 不跑
+    lifespan=天然降级轮询）+**msgbuf Redis 只在生产装配链接线**（M3.10②；注入
+    runtime 的测试形态缺省 None、可显式注入）。
     注入 runtime 却不给 gateway/chat_service = 聊天与审批不可用（端点响亮失败）：
-    kb/usage 类测试形态合法，聊天/审批测试必须补 gateway。
+    kb/usage 类测试形态合法，聊天/审批/流式测试必须补 gateway。
     """
     s = settings or get_settings()
     factory = session_factory or get_session_factory()
-    app = FastAPI(title="Aegis", version="0.1.0")
+    notify = notifier or EventNotifier(s.database_url_app)
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        await notify.start()
+        try:
+            yield
+        finally:
+            await notify.stop()
+
+    app = FastAPI(title="Aegis", version="0.1.0", lifespan=_lifespan)
     app.state.settings = s
     app.state.session_factory = factory
     gw = gateway
     lock: SessionLock | None = None
-    msg_redis: aioredis.Redis | None = None
     if runtime is None:
         gw = gw or build_gateway()
         lock = build_session_lock()
         retrieval = RetrievalProvider(Retriever(factory, build_embedding_client()))
         # M3.9①（#8）：批准后前置校验接线——M2.9 挂点在此通电，API 与 worker 共用同一模块
         runtime = AgentRuntime(gw, factory, lock=lock, precheck=build_precheck(factory), retrieval=retrieval)
-        msg_redis = get_redis()  # M3.10②：msgbuf 只在生产装配链接线（测试注入 runtime 时=None）
+        if msg_redis is None:
+            msg_redis = get_redis()  # M3.10②：msgbuf 只在生产装配链接线
     app.state.runtime = runtime
+    app.state.notifier = notify
+    app.state.msg_redis = msg_redis
     app.state.limiter = limiter or RateLimiter(get_redis(), replicas=s.replica_count)
     if chat_service is None and gw is not None:
         chat_service = ChatService(
@@ -80,6 +94,8 @@ def create_app(
     app.include_router(chat.router)
     app.include_router(kb.router)
     app.include_router(approvals.router)
+    app.include_router(stream.router)
+    app.include_router(events_view.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:  # 存活探针（02 §9）：不查依赖，进程活着就 200
