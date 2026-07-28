@@ -21,10 +21,12 @@ celery_app = Celery(
     include=["aegis.workers.ingest", "aegis.workers.reaper", "aegis.workers.hitl"],
 )
 celery_app.conf.update(
-    task_ignore_result=True,  # 无 result backend（3.2#9）：结果进日志与事件流，少一个 Redis 键面
-    broker_connection_retry_on_startup=True,  # Celery 5.3+ 要求显式声明启动期重连策略（§7 陷阱 3）
-    timezone="UTC",  # 调度时区显式钉死，不依赖主机时区
+    task_ignore_result=True,
+    broker_connection_retry_on_startup=True,
+    timezone="UTC",
     enable_utc=True,
+    task_acks_late=True,  # 至少一次投递：崩溃后消息仍在 unacked，会被重投
+    task_reject_on_worker_lost=True,  # prefork 下子进程被杀时拒绝而非吞掉（solo 形态无事可做，M4.7 兑现）
 )
 celery_app.conf.beat_schedule = {
     "reap-expired-leases": {

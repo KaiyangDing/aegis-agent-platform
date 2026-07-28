@@ -43,3 +43,22 @@ def test_hitl_task_registered() -> None:
 def test_task_ignore_result_on() -> None:
     """无 result backend（3.2#9）：fire-and-forget，结果进日志与事件流。"""
     assert celery_app.conf.task_ignore_result is True
+
+
+def test_delivery_is_at_least_once() -> None:
+    """M3 复盘补丁一（站 4 候选⑥）：投递语义钉死为"至少一次 × 幂等消费"。
+
+    Celery 默认 acks_late=False 在任务执行**前**就 ack——worker 崩溃/被杀即消息
+    永久消失，documents 卡在 PROCESSING 且无人兜底（reaper 只扫 sessions 租约）。
+    改取至少一次的前提是三个任务体全部可重放，逐个有证：
+    - ingest_document：四步收敛（test_ingest_resume.test_rerun_when_all_embedded_is_noop_done
+      是"重投=零调用直落 DONE"的上界证词）；
+    - reap_expired_leases / expire_approvals：周期对账型，每轮从库状态重推、
+      赛跑由 CAS 裁出恰一赢家，重投与下一个 tick 无异。
+    reject_on_worker_lost 覆盖另一种死法（prefork 子进程被杀；--pool=solo 无父进程
+    故本地无事可做，M4.7 Linux prefork 兑现）。
+    **为什么值得一条纯配置断言**：这两个值被回退时的故障形态是"文档静默丢失"——
+    无异常、无日志、测试全绿，没有任何别的机制会喊。
+    """
+    assert celery_app.conf.task_acks_late is True
+    assert celery_app.conf.task_reject_on_worker_lost is True
