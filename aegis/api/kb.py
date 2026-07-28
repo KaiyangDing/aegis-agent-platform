@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from celery import Celery
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from aegis.api.auth import Principal, require_roles
@@ -43,7 +44,8 @@ class KbDocumentIn(BaseModel):
 
 def build_enqueue(settings: Settings) -> EnqueueFn:
     """生产入队器：只发不收的 Celery producer。构造零 IO（连接在首次 send 时懒建），
-    与 worker 共用同一 broker URL；send_task 是同步小 IO（本地 Redis 毫秒级），v1 接受。"""
+    与 worker 共用同一 broker URL；send_task 是同步 IO——端点侧经 run_in_threadpool
+    下放线程池执行，broker 失联的建连超时×重试不再阻塞 event loop（M3 复盘补丁二）。"""
     producer = Celery("aegis", broker=settings.redis_url)
 
     def enqueue(document_id: str, tenant_id: str) -> None:
@@ -75,7 +77,10 @@ async def upload_document(
                 )
             )
     try:
-        request.app.state.enqueue(doc_id, principal.tenant_id)
+        # M3 复盘补丁二：send_task 是同步 IO，直调会阻塞 event loop——成功路径毫秒级，
+        # 但 broker 失联时建连超时×重试可达秒级，阻塞的是全进程并发；下放 AnyIO 线程池，
+        # 异常仍经 await 原样传回，EnqueueFn 签名与 503 降级分支都不动
+        await run_in_threadpool(request.app.state.enqueue, doc_id, principal.tenant_id)
     except Exception as exc:  # broker 不可用（kombu OperationalError 族）：降级不伪装
         logger.warning("摄取入队失败（行留 PENDING，可重投）：document=%s", doc_id, exc_info=True)
         raise HTTPException(

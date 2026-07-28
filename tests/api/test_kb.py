@@ -7,6 +7,8 @@ tests/workers/test_ingest_resume.py 钉死，本文件不重复。
 
 from __future__ import annotations
 
+import threading
+
 import httpx
 import pytest
 from pydantic import SecretStr
@@ -31,13 +33,15 @@ class _NoGateway:
 
 
 class _RecordingEnqueue:
-    """入队缝替身：记录 (document_id, tenant_id)；boom=True 模拟 broker 不可用。"""
+    """入队缝替身：记录 (document_id, tenant_id) 与执行线程；boom=True 模拟 broker 不可用。"""
 
     def __init__(self, *, boom: bool = False) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.threads: list[int] = []  # 补丁二证词：每次调用发生在哪个线程
         self._boom = boom
 
     def __call__(self, document_id: str, tenant_id: str) -> None:
+        self.threads.append(threading.get_ident())  # 先记后炸：503 路径同样留证
         if self._boom:
             raise ConnectionError("broker 不在")
         self.calls.append((document_id, tenant_id))
@@ -134,3 +138,19 @@ async def test_payload_validation_is_422(db_session_factory) -> None:
         r2 = await c.post("/v1/kb/documents", json={"source": "a.md"}, headers=_bearer(Role.OPERATOR, "op-a1"))
     assert (r1.status_code, r2.status_code) == (422, 422)
     assert enqueue.calls == []
+
+
+async def test_enqueue_runs_off_event_loop_thread(db_session_factory) -> None:
+    """M3 复盘补丁二回归钉子：同步 enqueue（send_task）必须离开 event loop 线程执行。
+
+    直调的代价只在 broker 失联时显形——建连超时（celery 5.6.3 默认 4s）×重试
+    阻塞的是全进程并发；而回退成直调时无任何行为差异可测（照常 202、全绿），
+    故以线程身份作证词：执行线程 ≠ 本协程所在的 event loop 线程。
+    （ASGITransport 在测试同一 loop 内派发请求，get_ident() 即 loop 线程 id。）
+    """
+    enqueue = _RecordingEnqueue()
+    async with _client(_make_app(db_session_factory, enqueue)) as c:
+        resp = await c.post("/v1/kb/documents", json=_payload(), headers=_bearer(Role.OPERATOR, "op-a1"))
+    assert resp.status_code == 202
+    assert enqueue.threads != []
+    assert enqueue.threads[0] != threading.get_ident()
