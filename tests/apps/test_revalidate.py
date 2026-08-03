@@ -180,3 +180,64 @@ def test_registry_pins_gated_write_tools() -> None:
     """登记面契约钉死（#38 声明清单同款手法）：恰好覆盖两枚带风险闸门的写工具——
     少一枚=高危写批准后裸奔进 fail-closed 拒绝，多一枚=给不过审批的工具白造校验器。"""
     assert set(REVALIDATORS) == {"refund_apply", "coupon_grant"}
+
+
+# ---------------------------------------------------------------------------
+# M4.3 增量：(53) revalidate 与 mock 拒绝面的对齐证人
+# ---------------------------------------------------------------------------
+
+_ALIGN_CASES = [
+    ("refund_apply", "paid", "50.00", True, "新鲜订单额度内：两侧同放"),
+    ("refund_apply", "paid", "300.00", True, "恰等上限：> 是严格大于，最易漂的边界"),
+    ("refund_apply", "paid", "300.01", False, "超上限：两侧同拒"),
+    ("refund_apply", "refunded", "50.00", False, "已退款终态：两侧同拒"),
+    ("refund_apply", None, "50.00", False, "订单不存在：两侧同拒"),
+    ("coupon_grant", "refunded", "30.00", True, "补发不看状态：mock 放行，校验器不得更严"),
+    ("coupon_grant", None, "30.00", False, "订单不存在：两侧同拒"),
+]
+_ALIGN_IDS = [
+    "refund-fresh",
+    "refund-exact-limit",
+    "refund-over-limit",
+    "refund-refunded",
+    "refund-missing",
+    "coupon-refunded-passes",
+    "coupon-missing",
+]
+
+
+@pytest.mark.parametrize(("tool", "status", "amount", "both_pass", "why"), _ALIGN_CASES, ids=_ALIGN_IDS)
+async def test_rejection_surface_stays_aligned_with_mock(
+    db_session_factory, tool: str, status: str | None, amount: str, both_pass: bool, why: str
+) -> None:
+    """(53)：revalidate 与 mock 执行器"逐字对齐"首次有 CI 证人——同一份订单事实，
+    校验器判定必须与下游执行判定一致（docstring 承诺从此有人作证）。
+
+    漂移两方向危害不对称：revalidate 更松 = 漏一类 TOCTOU（还有 mock 409 兜底）；
+    revalidate 更严 = **批准后白拒无人兜**（用户看到"已取消执行"而下游本会成功）。
+    后者是主守方向——coupon-refunded-passes（终态订单补发照过）钉的就是它。
+    顺序纪律：revalidate（纯读）先跑、mock（放行例会翻订单状态）后跑，互不污染。
+    """
+    import uuid
+
+    import httpx
+
+    from aegis.apps.support.mock_backend.app import create_mock_api
+    from aegis.core.config import Settings
+
+    oid = f"rv-align-{uuid.uuid4().hex[:8]}"
+    if status is not None:
+        await _seed_order(db_session_factory, oid, status=status)
+    veto = await REVALIDATORS[tool](db_session_factory, {"order_id": oid, "amount": amount})
+    reval_passes = veto is None
+
+    app = create_mock_api(settings=Settings(), session_factory=db_session_factory)
+    endpoint = "/refunds" if tool == "refund_apply" else "/coupons"
+    body = {"tenant_id": "t-rv", "user_id": "u-rv-1", "order_id": oid, "amount": amount}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://mock") as c:
+        resp = await c.post(endpoint, json=body, headers={"Idempotency-Key": uuid.uuid4().hex})
+    mock_passes = resp.status_code == 200
+
+    assert reval_passes == mock_passes == both_pass, (
+        f"拒绝面漂移（{why}）：revalidate={'放行' if reval_passes else veto} / mock={resp.status_code}"
+    )

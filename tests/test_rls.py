@@ -626,3 +626,133 @@ async def test_admin_cross_tenant_trace_usage_visible_under_rls(rls_engine, owne
     assert "13812345678" not in content
     assert body["usage"]["requests"] == 1  # (58) 防线本体：不包 tenant_context 这里是 0
     assert Decimal(body["usage"]["cost"]) == Decimal("0.002")
+
+
+# ---------------------------------------------------------------------------
+# M4.3 增量节：#47 薄层——"业务入口 × RLS 在场"的三枚交互面证人
+# ---------------------------------------------------------------------------
+# #47 本体：根 conftest 连 owner（超管+BYPASSRLS+表 owner 三重豁免），业务代码与
+# RLS 的交互面在 CI 长期无证人——M3 在此缝踩过四次（M3.5 叶子自包裹 / M3.8 无身份
+# 读配置 / M3.12 对账面归零 / #46），前三次全靠人肉真实链路撞出。本节按 #47 建议
+# 形态给三类入口各钉一条 rls_engine 行为断言：读租户配置（TenantDirectory）/
+# 写账本（MeteringRecorder）/ mock 台账回放读（观察 ㉚）。读会话入口的证人已在
+# M4.0②/M4.1② 两节（stream/trace 端点级），不重复。
+
+
+@pytest.fixture
+async def tenants_rls_seeded(rls_ready, owner_engine):
+    """tenants 表种 rls-t-a 一行（策略绑行主键即租户 id——迁移 c895f ("tenants","id")；
+    created_at/updated_at 走 server_default，裸 INSERT 无需显式给）。"""
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("DELETE FROM tenants WHERE id LIKE 'rls-t-%'"))
+        await conn.execute(
+            text(
+                "INSERT INTO tenants (id, name, config, token_budget_monthly) "
+                "VALUES ('rls-t-a', '证人租户A', CAST(:cfg AS jsonb), 1000)"
+            ),
+            {"cfg": json.dumps({"approval_threshold": 200}, ensure_ascii=False)},
+        )
+    yield
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("DELETE FROM tenants WHERE id LIKE 'rls-t-%'"))
+
+
+async def test_tenant_directory_config_read_requires_context_under_rls(rls_engine, tenants_rls_seeded) -> None:
+    """M3.8 幕 C 实录的 CI 化：无身份读租户配置 = RLS 静默空（None），有身份即读到。
+
+    失败形态是"静默不见"而非报错——TenantDirectory 用 scalar_one_or_none，RLS 空集
+    被翻译成"租户不存在"，上层看到的症状与配置漏建一模一样。负例在前正例在后：
+    目录只缓存命中（None 不入缓存），该顺序下负例不会经缓存粘给正例。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from aegis.core.tenancy import TenantDirectory
+
+    directory = TenantDirectory(async_sessionmaker(rls_engine, expire_on_commit=False))
+    assert await directory.get_tenant("rls-t-a") is None  # 行在库里，但无上下文时它"不存在"
+    with tenant_context("rls-t-a"):
+        row = await directory.get_tenant("rls-t-a")
+    assert row is not None
+    assert row.config["approval_threshold"] == 200
+
+
+async def test_metering_record_lands_and_rejects_under_rls(rls_engine, rls_ready, owner_engine) -> None:
+    """写账本入口的 RLS 双面证人：本租上下文写本租行真落库（WITH CHECK 放行面），
+    上下文与行租户不一致 = 42501 响亮拒——写侧从不静默吞行。
+
+    usage 置 cached=True：compute_cost 短路归零不触价目表——证人零价目依赖
+    （M4.2① #10 gauge 空价目构造的 record 侧对偶）。落库核数走 owner 面
+    （对账读的"非零 sanity"，M3.12 D4 口径）。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from aegis.gateway.metering import MeteringRecorder
+    from aegis.gateway.schema import LLMRequest, Message, UsageChunk
+
+    recorder = MeteringRecorder(async_sessionmaker(rls_engine, expire_on_commit=False), prices={})
+    usage = UsageChunk(model="m-rls-m43", prompt_tokens=10, completion_tokens=5, cached=True)
+    req_ok = LLMRequest(
+        tier="standard",
+        messages=[Message(role="user", content="hi")],
+        tenant_id="rls-t-a",
+        session_id="s-rls-a",
+        request_id="rq-rls-m43-ok",
+    )
+    try:
+        with tenant_context("rls-t-a"):
+            await recorder.record(req_ok, "bailian", usage)
+        async with owner_engine.connect() as conn:
+            n = (
+                await conn.execute(text("SELECT count(*) FROM usage_ledger WHERE request_id = 'rq-rls-m43-ok'"))
+            ).scalar_one()
+        assert n == 1  # 真落库，不是"没报错"（非零 sanity）
+        req_cross = req_ok.model_copy(update={"tenant_id": "rls-t-b", "request_id": "rq-rls-m43-bad"})
+        with tenant_context("rls-t-a"):
+            with pytest.raises(ProgrammingError):  # WITH CHECK：42501
+                await recorder.record(req_cross, "bailian", usage)
+    finally:
+        async with owner_engine.begin() as conn:
+            await conn.execute(text("DELETE FROM usage_ledger WHERE request_id LIKE 'rq-rls-m43-%'"))
+
+
+async def test_mock_claim_replay_cross_tenant_is_loud_under_rls(mock_rls_seeded, mock_rls_engine) -> None:
+    """观察 ㉚ 的证人：`_claim_and_execute` 回放分支 SELECT 不带租户过滤（app.py:104，
+    与 claim 的 INSERT 不对称）——"RLS 第二层由调用侧环境承担"这句 docstring 首次有 CI 作证。
+
+    跨租撞键（A 上下文撞 B 的既有键）：唯一索引仲裁发生在存储层不看 RLS（claim
+    rowcount=0 照样成立），随后的回放读被 RLS 拦成空集 → scalar_one 响亮
+    NoResultFound（ASGITransport 默认让根因裸穿；生产端点面即 500）——绝不静默
+    借用 B 的结果快照。同租撞键回放 duplicate:true 健康如常。幂等键一旦改成
+    业务可控值（订单号+操作类型），跨租撞键就从"不可构造"变成常态路径——
+    届时本条的期望要按 ㉚ 修向（补租户过滤）重审。
+    """
+    import httpx
+    from sqlalchemy.exc import NoResultFound
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from aegis.apps.support.mock_backend.app import create_mock_api
+    from aegis.core.config import Settings
+
+    owner = mock_rls_seeded
+    async with owner.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO mock_write_ops (idempotency_key, kind, tenant_id, payload) "
+                "VALUES ('wo-rls-claim-b', 'refund', 'rls-t-b', CAST(:p AS jsonb))"
+            ),
+            {"p": json.dumps({"order_id": "mo-rls-b", "status": "refunded"})},
+        )
+    app = create_mock_api(
+        settings=Settings(), session_factory=async_sessionmaker(mock_rls_engine, expire_on_commit=False)
+    )
+    body = {"tenant_id": "rls-t-a", "user_id": "u-rls", "order_id": "mo-rls-a", "amount": "1.00"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://mock") as c:
+        with tenant_context("rls-t-a"):
+            with pytest.raises(NoResultFound):  # 撞 B 键：响亮炸，不借用
+                await c.post("/refunds", json=body, headers={"Idempotency-Key": "wo-rls-claim-b"})
+            first = await c.post("/refunds", json=body, headers={"Idempotency-Key": "wo-rls-claim-a"})
+            assert first.status_code == 200
+            assert first.json()["duplicate"] is False
+            again = await c.post("/refunds", json=body, headers={"Idempotency-Key": "wo-rls-claim-a"})
+            assert again.status_code == 200
+            assert again.json()["duplicate"] is True  # 同租回放：RLS 在场时健康如常
