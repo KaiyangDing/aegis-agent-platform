@@ -14,7 +14,7 @@ from uuid import uuid4
 from aegis.apps.support.rag.models import DocumentRecord
 from aegis.core.tenancy import TenantRecord
 from aegis.gateway.metering import UsageRecord
-from aegis.obs.metrics import REGISTRY, RUNS_TERMINATED, refresh_db_metrics
+from aegis.obs.metrics import CACHE_REQUESTS, REGISTRY, RUNS_TERMINATED, refresh_db_metrics
 from aegis.runtime.events import EventType
 from aegis.runtime.store import EventWriter, SessionRecord
 
@@ -68,8 +68,14 @@ async def test_tokens_and_cost_aggregated_from_ledger(db_session_factory) -> Non
 
 
 async def test_cache_hit_miss_split_delta(db_session_factory) -> None:
-    """#9：cached 真假切 hit/miss。无租户 label 可过滤——同测两刷取差（delta 式）。"""
+    """#9：cached 真假切 hit/miss。无租户 label 可过滤——同测两刷取差（delta 式）。
+
+    先 clear 掉共享 label 的跨测试陈旧 child（CI 空库首刷查回零行时不触发 set，
+    gauge 会保留上一个测试世界的旧值→delta 基线错位——CI 红实录，M2.11 教训⑵
+    "环境依赖测试"的指标版；clear 后 delta 在空库/脏库两个世界都精确）。
+    """
     tid, sid = _ids()
+    CACHE_REQUESTS.clear()
     await refresh_db_metrics(db_session_factory)
     hit_before = _sample("aegis_cache_requests", {"result": "hit"}) or 0.0
     miss_before = _sample("aegis_cache_requests", {"result": "miss"}) or 0.0
