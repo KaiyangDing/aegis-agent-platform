@@ -153,11 +153,21 @@ async def _task_runtime() -> AsyncIterator[AgentRuntime]:
         )
         yield runtime
     finally:
+        # M4.0②（63）：五件串行释放各自保护——一件抛不该带走其余（长驻 worker 每任务
+        # 泄漏一条 HTTP 池/Redis 连接/DB 引擎，累积成"跑一天后打不开新连接"），且清理
+        # 期的次生异常不该顶掉 try 体内真正的首因（M2.12 偏差 #7 同族）。
+        # 释放顺序不变：先摘装配缝，再由外向内还资源。
         set_mock_client(None)
-        await mock.aclose()
-        await http.aclose()
-        await redis.aclose()
-        await app_engine.dispose()
+        for _name, _close in (
+            ("mock", mock.aclose),
+            ("http", http.aclose),
+            ("redis", redis.aclose),
+            ("engine", app_engine.dispose),
+        ):
+            try:
+                await _close()
+            except Exception:
+                logger.warning("任务局部资源释放失败（继续释放其余）：%s", _name, exc_info=True)
 
 
 async def _resume_in_context(session_id: str, approval_id: str | None) -> None:

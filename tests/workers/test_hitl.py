@@ -151,3 +151,63 @@ def test_module_import_registers_real_hook() -> None:
     """拍板Ⅰ收尾：import 本模块（celery include 同路径）即注册真实钩子——
     reaper 抢租后恢复不再"无钩子只抢租"。"""
     assert reaper._resume_hook is hitl.resume_session  # noqa: SLF001 —— 注册面取证
+
+
+async def test_task_runtime_releases_all_resources_on_partial_failure(monkeypatch) -> None:
+    """M4.0② (63)：`_task_runtime` finally 五个串行 await 无各自保护——一个抛则其余泄漏。
+
+    形态与 M2.12 偏差 #7（`_pump_with_lease` finally 次生异常顶掉原始异常）同族：
+    长驻 worker 进程里每次任务泄漏一条 HTTP 连接池/Redis 连接/DB 引擎，累积成
+    "跑了一天之后 worker 打不开新连接"——且首因（某个 aclose 抛）被淹没。
+
+    测法：让**第一个** aclose 抛，断言其余三件仍被释放且归还顺序不变。
+    未修代码：mock.aclose 抛出后 http/redis/engine 三件永不执行、异常裸传给调用方。
+    修后语义：清理失败降级为 warning（清理不是调用方的业务错误，且它会顶掉 try 体内
+    真正的首因异常——M2.12 偏差 #7 同族），但绝不阻断其余释放。
+    """
+    import httpx as _httpx
+    from sqlalchemy.ext.asyncio import create_async_engine as _create_engine
+
+    from aegis.workers import hitl as hitl_mod
+
+    closed: list[str] = []
+
+    class _Recorder:
+        def __init__(self, name: str, *, boom: bool = False) -> None:
+            self._name = name
+            self._boom = boom
+
+        async def aclose(self) -> None:
+            if self._boom:
+                raise RuntimeError(f"{self._name} 关闭失败")
+            closed.append(self._name)
+
+        async def dispose(self) -> None:
+            closed.append(self._name)
+
+    def _fake_mock_client(*a, **kw):
+        return _Recorder("mock", boom=True)  # 第一个就炸
+
+    monkeypatch.setattr(hitl_mod, "new_redis_client", lambda: _Recorder("redis"))
+    monkeypatch.setattr(hitl_mod, "new_http_client", lambda: _Recorder("http"))
+    monkeypatch.setattr(hitl_mod.httpx, "AsyncClient", _fake_mock_client)
+    monkeypatch.setattr(hitl_mod, "create_async_engine", lambda *a, **kw: _Recorder("engine"))
+    monkeypatch.setattr(hitl_mod, "install_tenant_guard", lambda engine: None)
+    monkeypatch.setattr(hitl_mod, "async_sessionmaker", lambda *a, **kw: lambda: None)
+    monkeypatch.setattr(hitl_mod, "build_gateway", lambda **kw: object())
+    monkeypatch.setattr(hitl_mod, "build_session_lock", lambda **kw: None)
+    monkeypatch.setattr(hitl_mod, "build_embedding_client", lambda *a, **kw: object())
+    monkeypatch.setattr(hitl_mod, "build_precheck", lambda f: None)
+    monkeypatch.setattr(hitl_mod, "RetrievalProvider", lambda r: None)
+    monkeypatch.setattr(hitl_mod, "Retriever", lambda *a, **kw: None)
+    monkeypatch.setattr(hitl_mod, "AgentRuntime", lambda *a, **kw: "runtime-stub")
+    monkeypatch.setattr(hitl_mod, "create_mock_api", lambda *a, **kw: None)
+    monkeypatch.setattr(hitl_mod, "set_mock_client", lambda c: None)
+
+    async with hitl_mod._task_runtime() as rt:
+        assert rt == "runtime-stub"
+
+    # mock 的 aclose 抛了，其余四件仍须全部归还（顺序不变）
+    assert closed == ["http", "redis", "engine"], f"资源泄漏：仅归还 {closed}"
+
+    _ = (_httpx, _create_engine)  # 保持 import 显式（monkeypatch 目标来自模块属性）
