@@ -147,10 +147,12 @@ async def test_replay_translates_events_with_seq_ids(db_session_factory) -> None
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     frames = _frames(resp.text)
-    assert [(k, seq) for k, _, seq in frames] == [("token", 4), ("done", 5)]
-    assert frames[0][1]["text"] == "订单已发货。"
-    assert frames[1][1]["reason"] == "completed"
-    assert frames[1][1]["usage"] == {"prompt_tokens": 11, "completion_tokens": 7}
+    # (73) 修复后 user_message(seq=1) 也译——重放不再是半边对话
+    assert [(k, seq) for k, _, seq in frames] == [("user_message", 1), ("token", 4), ("done", 5)]
+    assert frames[0][1]["text"] == "查订单"
+    assert frames[1][1]["text"] == "订单已发货。"
+    assert frames[2][1]["reason"] == "completed"
+    assert frames[2][1]["usage"] == {"prompt_tokens": 11, "completion_tokens": 7}
 
 
 async def test_after_seq_and_last_event_id_take_max(db_session_factory) -> None:
@@ -202,9 +204,11 @@ async def test_message_reset_emitted_before_live_tail(r) -> None:
             await task
         frames = _frames(resp.text)
         kinds = [k for k, _, _ in frames]
-        assert kinds == ["message_reset", "token", "done"]  # 回放（user_message 无帧）→ 重置 → 活尾
-        assert frames[0][1]["text"] == "从前有座山，山里"
-        assert frames[1][1]["text"] == "从前有座山，山里有座庙。"
+        # (73) 修复后：回放含用户侧气泡 → msgbuf 整条重置 → 活尾终稿与终止
+        assert kinds == ["user_message", "message_reset", "token", "done"]
+        assert frames[0][1]["text"] == "讲个长故事"
+        assert frames[1][1]["text"] == "从前有座山，山里"
+        assert frames[2][1]["text"] == "从前有座山，山里有座庙。"
     finally:
         await _cleanup_session(factory, sid)
         await engine.dispose()
@@ -261,5 +265,5 @@ async def test_replay_batching_drains_backlog_before_close(db_session_factory, m
         resp = await c.get(f"/v1/sessions/{sid}/stream", headers=_bearer(tid, "u-st1"))
     assert resp.status_code == 200
     ids = [ln.split(":", 1)[1].strip() for ln in resp.text.splitlines() if ln.startswith("id:")]
-    # 5 事件跨三批（2+2+1）：可译帧 seq 2/4/5 全在且有序（user_message 不译=(73) 已知差集）
-    assert ids == ["2", "4", "5"]
+    # 5 事件跨三批（2+2+1）：(73) 修复后 user_message 也译——五帧 seq 1–5 一条不少且有序
+    assert ids == ["1", "2", "3", "4", "5"]

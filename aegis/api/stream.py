@@ -52,11 +52,14 @@ async def _ensure_owned(factory: SessionFactory, session_id: str, principal: Pri
 
 
 def _translate(rows: Sequence[Any], state: dict[str, Any]) -> list[ChatFrame]:
-    """事件→帧（与 service._run_main 同一张译表；state 跨批携带工具名/usage 累计/终止位）。"""
+    """事件→帧（service._run_main 同源译表；GET 侧多译 user_message——重放要重建
+    整段对话，POST 侧用户消息本地已有，(73)；state 跨批携带工具名/usage 累计/终止位）。"""
     frames: list[ChatFrame] = []
     for row in rows:
         etype, payload, seq = row.type, row.payload, row.seq
-        if etype == EventType.ASSISTANT_MESSAGE.value:
+        if etype == EventType.USER_MESSAGE.value:
+            frames.append(ChatFrame("user_message", {"text": str(payload["content"])}, seq=seq))
+        elif etype == EventType.ASSISTANT_MESSAGE.value:
             frames.append(ChatFrame("token", {"text": str(payload["content"])}, seq=seq))
         elif etype == EventType.TOOL_CALL.value:
             state["last_tool"] = str(payload.get("tool_name", ""))

@@ -36,8 +36,9 @@ def test_cjk_not_ascii_escaped() -> None:
 
 
 @pytest.mark.parametrize(
-    "kind", ["token", "tool_status", "approval_pending", "done", "error", "message_reset", "handoff"]
+    "kind",
+    ["token", "user_message", "tool_status", "approval_pending", "done", "error", "message_reset", "handoff"],
 )
 def test_all_frame_kinds_encode(kind: str) -> None:
-    """帧词汇全表可编码（ADR-007 五帧 + D11 message_reset + handoff）。"""
+    """帧词汇全表可编码（ADR-007 五帧 + D11 message_reset + handoff + (73) user_message）。"""
     assert encode_frame(ChatFrame(kind, {})).startswith(f"event: {kind}\n")

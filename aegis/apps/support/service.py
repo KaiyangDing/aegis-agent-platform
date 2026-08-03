@@ -53,7 +53,8 @@ def msgbuf_key(session_id: str) -> str:
 @dataclass(frozen=True, slots=True)
 class ChatFrame:
     """服务层输出帧=SSE 帧词汇（M3.10② 拍板Ⅲ：单一帧类型贯穿 service→通道）：
-    kind ∈ token/tool_status/approval_pending/handoff/done/error/message_reset；
+    kind ∈ token/user_message/tool_status/approval_pending/handoff/done/error/message_reset
+    （user_message 仅 GET 回放在场——POST 侧用户消息本地已有，(73)）；
     seq 仅 GET 通道回放事件时在场（编码为 SSE id:，Last-Event-ID 续传）。"""
 
     kind: str

@@ -104,6 +104,8 @@ function handleFrame(f) {
   if (f.id !== null && f.id > lastSeq) lastSeq = f.id;   // 续传游标只认 GET 帧的 id:
   const d = f.data || {};
   switch (f.event) {
+    case "user_message":    // 仅 GET 回放在场（(73)）：重建用户侧蓝气泡，重放不再是半边对话
+      addBubble("user", d.text); bubble = null; break;
     case "token":
       if (!bubble) bubble = addBubble("assistant", "");
       bubble.textContent += d.text; $("pane").scrollTop = 1e9; break;
