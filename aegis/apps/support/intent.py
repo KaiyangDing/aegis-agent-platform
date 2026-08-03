@@ -60,6 +60,9 @@ def _parse_intent(raw: str) -> Intent:
     hits = [word for word in _INTENT_WORDS if word.value in answer]
     if len(hits) == 1:
         return hits[0]
+    # M4.2③（观察 ㉓)：三条通往 AGENT 的路此前只有网关异常留痕——零/多词这条补上，
+    # "分诊失败率"才可观测。只记命中数与长度：模型原文可能复述用户消息（打码纪律）
+    logger.warning("意图解析不可靠，fail-open 走主 Agent：hits=%d len=%d", len(hits), len(answer))
     return Intent.AGENT
 
 

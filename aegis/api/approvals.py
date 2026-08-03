@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from aegis.api.auth import Principal, require_roles
+from aegis.api.ratelimit import rate_limited
 from aegis.apps.support.service import ChatService
 from aegis.core.locks import SessionLockHeld
 from aegis.core.tenancy import Role, SessionFactory
@@ -38,6 +39,12 @@ from aegis.runtime.store import (
 )
 
 router = APIRouter()
+
+
+_ADMITTED = rate_limited(require_roles(Role.OPERATOR, Role.ADMIN))
+"""M4.2③（观察 (56)）：审批是最花钱的入站入口（一次 POST=一整轮 Agent 续跑），
+挂租户维度入站限流——与 chat/kb 同桶（inbound:{tenant_id}）；链序 401→403→429
+仍先于一切 handler 逻辑，超限探测不出任何单据存在性。"""
 
 
 class ApprovalDecision(BaseModel):
@@ -94,7 +101,7 @@ async def decide_approval(
     approval_id: str,
     body: ApprovalDecision,
     request: Request,
-    principal: Annotated[Principal, Depends(require_roles(Role.OPERATOR, Role.ADMIN))],
+    principal: Annotated[Principal, Depends(_ADMITTED)],
 ) -> dict[str, Any]:
     factory: SessionFactory = request.app.state.session_factory
     runtime: AgentRuntime = request.app.state.runtime

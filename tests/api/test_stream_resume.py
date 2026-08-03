@@ -239,3 +239,27 @@ async def test_live_tail_streams_new_events_until_terminated() -> None:
     finally:
         await _cleanup_session(factory, sid)
         await engine.dispose()
+
+
+async def test_replay_batching_drains_backlog_before_close(db_session_factory, monkeypatch) -> None:
+    """(74)（M4.2③）：首批回放有界（_REPLAY_BATCH 分批）——存量排空才进关流判据；
+    终止事件落在末批也不早退，可译帧一条不少（silent cap 纪律：分批≠截断）。"""
+    from aegis.api import stream as stream_mod
+
+    monkeypatch.setattr(stream_mod, "_REPLAY_BATCH", 2)
+    tid, sid = f"t-st-{uuid4().hex[:8]}", f"st-{uuid4().hex[:8]}"
+    async with db_session_factory() as s:
+        async with s.begin():
+            s.add(SessionRecord(id=sid, tenant_id=tid, user_id="u-st1"))  # run_state 缺省 idle
+    w = await EventWriter.open(db_session_factory, sid, "run-st-1")
+    await w.append(EventType.USER_MESSAGE, {"content": "查订单"})
+    await w.append(EventType.ASSISTANT_MESSAGE, {"content": "第一段。"})
+    await w.append(EventType.USER_MESSAGE, {"content": "再查"})
+    await w.append(EventType.ASSISTANT_MESSAGE, {"content": "第二段。"})
+    await w.append(EventType.LOOP_TERMINATED, {"reason": "completed", "iteration": 1, "detail": ""})
+    async with _client(_make_app(db_session_factory)) as c:
+        resp = await c.get(f"/v1/sessions/{sid}/stream", headers=_bearer(tid, "u-st1"))
+    assert resp.status_code == 200
+    ids = [ln.split(":", 1)[1].strip() for ln in resp.text.splitlines() if ln.startswith("id:")]
+    # 5 事件跨三批（2+2+1）：可译帧 seq 2/4/5 全在且有序（user_message 不译=(73) 已知差集）
+    assert ids == ["2", "4", "5"]

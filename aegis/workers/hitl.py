@@ -49,14 +49,22 @@ KickHook = Callable[[str, str], Awaitable[None]]
 测试注入 spy——sweep_once 与 reap_once 同款：调度逻辑直测零 broker 零真实装配。"""
 
 
+_SWEEP_LIMIT = 100
+"""单轮扫描批上限（M4.2③，观察 (61)；list_expired limit=100 先例）：worker 停摆重启后
+N 最大的时刻恰是最该干活的时刻——分批 + 每轮从状态重推 = 自愈不塌；一轮 1+2N 个
+引擎会话的工作量从此有界。触顶必留痕（silent cap 纪律），余量下一轮 beat 继续。"""
+
+
 @dataclass(frozen=True, slots=True)
 class SweepReport:
-    """一轮对账的账目：expired=本轮翻转的到期单 / waiting=awaiting 会话数 /
-    kicked=被踢恢复的 (session_id, approval_id)。"""
+    """一轮对账的账目：expired=本轮翻转的到期单 / waiting=本批 awaiting 会话数
+    （≤_SWEEP_LIMIT）/ kicked=被踢恢复的 (session_id, approval_id) /
+    failed=踢失败的同形对（M4.2③：单单隔离不再静默吞账）。"""
 
     expired: tuple[str, ...]
     waiting: int
     kicked: tuple[tuple[str, str], ...]
+    failed: tuple[tuple[str, str], ...] = ()
 
 
 async def sweep_once(factory: SessionFactory, *, kick: KickHook, now: datetime | None = None) -> SweepReport:
@@ -76,13 +84,19 @@ async def sweep_once(factory: SessionFactory, *, kick: KickHook, now: datetime |
         waiting = (
             (
                 await s.execute(
-                    select(SessionRecord.id).where(SessionRecord.run_state == RunState.AWAITING_APPROVAL.value)
+                    select(SessionRecord.id)
+                    .where(SessionRecord.run_state == RunState.AWAITING_APPROVAL.value)
+                    .order_by(SessionRecord.id)  # LIMIT 无序=每轮随机领批；定序让余量必然轮到
+                    .limit(_SWEEP_LIMIT)
                 )
             )
             .scalars()
             .all()
         )
+    if len(waiting) == _SWEEP_LIMIT:
+        logger.warning("对账扫描达批上限 %d，余量下轮继续", _SWEEP_LIMIT)
     kicked: list[tuple[str, str]] = []
+    failed: list[tuple[str, str]] = []
     for sid in waiting:
         async with factory() as s:
             latest = (
@@ -93,14 +107,19 @@ async def sweep_once(factory: SessionFactory, *, kick: KickHook, now: datetime |
                     .limit(1)
                 )
             ).scalar_one_or_none()
-        if latest is None or latest.status == ApprovalStatus.PENDING.value:
-            continue  # 正常等待中（或无单异常态：留观不代管）
+        if latest is None:
+            # awaiting 会话零审批单=不可能态（挂起必先开单）：留痕不代管（M4.2③，(61)）
+            logger.warning("awaiting 会话无任何审批单（不可能态，留观不代管）：session=%s", sid)
+            continue
+        if latest.status == ApprovalStatus.PENDING.value:
+            continue  # 正常等待中
         try:
             await kick(sid, latest.id)
             kicked.append((sid, latest.id))
         except Exception:
             logger.exception("对账恢复失败（单单隔离）：session=%s approval=%s", sid, latest.id)
-    return SweepReport(expired=expired, waiting=len(waiting), kicked=tuple(kicked))
+            failed.append((sid, latest.id))
+    return SweepReport(expired=expired, waiting=len(waiting), kicked=tuple(kicked), failed=tuple(failed))
 
 
 async def _tenant_of_session(session_id: str) -> TenantRecord:
@@ -211,9 +230,18 @@ def expire_approvals() -> dict[str, int]:
     """beat 周期任务薄同步壳（reaper 3.2#7 同款）：asyncio.run 包 async 内核。"""
     report = asyncio.run(_sweep_fresh())
     logger.info(
-        "审批对账完成：expired=%d waiting=%d kicked=%d", len(report.expired), report.waiting, len(report.kicked)
+        "审批对账完成：expired=%d waiting=%d kicked=%d failed=%d",
+        len(report.expired),
+        report.waiting,
+        len(report.kicked),
+        len(report.failed),
     )
-    return {"expired": len(report.expired), "waiting": report.waiting, "kicked": len(report.kicked)}
+    return {
+        "expired": len(report.expired),
+        "waiting": report.waiting,
+        "kicked": len(report.kicked),
+        "failed": len(report.failed),
+    }
 
 
 # 进程级注册真实恢复钩子（拍板Ⅰ收尾）：celery include 点名本模块=worker 启动即注册；

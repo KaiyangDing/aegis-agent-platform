@@ -47,12 +47,26 @@ class _RecordingEnqueue:
         self.calls.append((document_id, tenant_id))
 
 
-def _make_app(factory, enqueue):
+class _Limiter:
+    """入站限流桩（M4.2③ 起 kb 挂 rate_limited）：缺省全放行；ok=False 演拒绝面。
+    不注入会落到 create_app 缺省的真 RateLimiter+get_redis()——跨 event loop
+    单例炸点（M2.9 教训）+ 共享桶让测试互相偷配额。"""
+
+    def __init__(self, *, ok: bool = True, wait: float = 0.0) -> None:
+        self._ok, self._wait = ok, wait
+
+    async def try_take(self, scope, rate, capacity, cost=1.0):
+        return (self._ok, self._wait)
+
+
+def _make_app(factory, enqueue, limiter: _Limiter | None = None):
     return create_app(
         Settings(jwt_secret=SecretStr(SECRET)),
         session_factory=factory,
         runtime=AgentRuntime(_NoGateway(), factory),
+        limiter=limiter or _Limiter(),
         enqueue=enqueue,
+        approvals_lookup=factory,  # M4.2③ GET 状态端点走平台查读缝——测试同一 SAVEPOINT 工厂
     )
 
 
@@ -154,3 +168,48 @@ async def test_enqueue_runs_off_event_loop_thread(db_session_factory) -> None:
     assert resp.status_code == 202
     assert enqueue.threads != []
     assert enqueue.threads[0] != threading.get_ident()
+
+
+async def test_upload_rate_limited_429(db_session_factory) -> None:
+    """⑥⑭（M4.2③）：kb 是花钱通道（一次上传→整链 embedding）——挂租户维度入站限流。
+    被拒的请求零副作用：不落库、不入队；Retry-After 来自桶的真实等待建议。"""
+    enqueue = _RecordingEnqueue()
+    app = _make_app(db_session_factory, enqueue, limiter=_Limiter(ok=False, wait=2.2))
+    async with _client(app) as c:
+        resp = await c.post("/v1/kb/documents", json=_payload(), headers=_bearer(Role.OPERATOR, "op-a1"))
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == "3"
+    assert enqueue.calls == []
+
+
+async def test_document_status_roundtrip(db_session_factory) -> None:
+    """⑱（M4.2③）：202"查询句柄"的兑现——status/chunk_count/error 从此运维可见；查无 404。"""
+    enqueue = _RecordingEnqueue()
+    app = _make_app(db_session_factory, enqueue)
+    async with _client(app) as c:
+        up = await c.post("/v1/kb/documents", json=_payload(), headers=_bearer(Role.OPERATOR, "op-a1"))
+        doc_id = up.json()["document_id"]
+        resp = await c.get(f"/v1/kb/documents/{doc_id}", headers=_bearer(Role.OPERATOR, "op-a1"))
+        ghost = await c.get(f"/v1/kb/documents/no-such-{doc_id}", headers=_bearer(Role.OPERATOR, "op-a1"))
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "document_id": doc_id,
+        "status": "pending",
+        "chunk_count": 0,
+        "error": None,
+        "source": "faq.md",
+    }
+    assert ghost.status_code == 404
+
+
+async def test_document_status_cross_tenant_403(db_session_factory) -> None:
+    """staff 面越界 403 点名（events_view/trace 同口径）；user 角色 403（矩阵 kb 行 ❌）。"""
+    enqueue = _RecordingEnqueue()
+    app = _make_app(db_session_factory, enqueue)
+    async with _client(app) as c:
+        up = await c.post("/v1/kb/documents", json=_payload(), headers=_bearer(Role.OPERATOR, "op-a1"))
+        doc_id = up.json()["document_id"]
+        other = await c.get(f"/v1/kb/documents/{doc_id}", headers=_bearer(Role.OPERATOR, "op-x", tid="tenant-x"))
+        user = await c.get(f"/v1/kb/documents/{doc_id}", headers=_bearer(Role.USER, "u-a1"))
+    assert other.status_code == 403
+    assert user.status_code == 403

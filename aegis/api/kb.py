@@ -13,25 +13,32 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import uuid4
 
 from celery import Celery
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from aegis.api.auth import Principal, require_roles
+from aegis.api.ratelimit import rate_limited
 from aegis.apps.support.rag.ingest import INGEST_TASK_NAME
 from aegis.apps.support.rag.models import DocumentRecord, IngestStatus
 from aegis.core.config import Settings
-from aegis.core.tenancy import Role
+from aegis.core.tenancy import Role, SessionFactory
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 _STAFF = require_roles(Role.OPERATOR, Role.ADMIN)
+
+_ADMITTED = rate_limited(_STAFF)
+"""M4.2③（观察 ⑥⑭）：kb 上传是花钱通道（一次 202→整链 embedding，200k 字符≈20 万
+token），挂租户维度入站限流——与 chat 同桶（inbound:{tenant_id}=租户总入站配额）。
+GET 状态查询不挂：读不花钱，与 stream 不挂同理（占连接/纯读归部署面）。"""
 
 EnqueueFn = Callable[[str, str], None]
 """入队缝：(document_id, tenant_id) → 投递。create_app 第六注入参（测试记录假/生产 producer）。"""
@@ -57,7 +64,7 @@ def build_enqueue(settings: Settings) -> EnqueueFn:
 @router.post("/v1/kb/documents", status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     request: Request,
-    principal: Annotated[Principal, Depends(_STAFF)],
+    principal: Annotated[Principal, Depends(_ADMITTED)],
     body: KbDocumentIn,
 ) -> dict[str, str]:
     """异步任务回执（202）：document_id 即后续查询句柄；status 恒 pending——
@@ -87,3 +94,31 @@ async def upload_document(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="摄取队列不可用，请稍后重试"
         ) from exc
     return {"document_id": doc_id, "status": IngestStatus.PENDING.value}
+
+
+@router.get("/v1/kb/documents/{document_id}")
+async def document_status(
+    document_id: str,
+    request: Request,
+    principal: Annotated[Principal, Depends(_STAFF)],
+) -> dict[str, Any]:
+    """202 句柄的兑现（M4.2③，观察 ⑱）：三种异常终态（FAILED 死因/卡 PROCESSING/
+    永久 PENDING）从此运维可见——error 列是消毒后的死因（M3.4 落列时已打码）。
+
+    staff 面口径与 events_view/trace 同构：owner 缝定位 → 404 缺失 →
+    operator 越界 403 点名；admin 平台级。
+    """
+    lookup: SessionFactory = request.app.state.approvals_lookup  # 平台查读缝（RLS 下 admin 跨租前提）
+    async with lookup() as s:
+        row = (await s.execute(select(DocumentRecord).where(DocumentRecord.id == document_id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
+    if principal.role is Role.OPERATOR and principal.tenant_id != row.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能查看其他租户的文档")
+    return {
+        "document_id": row.id,
+        "status": row.status,
+        "chunk_count": row.chunk_count,
+        "error": row.error,
+        "source": row.source,
+    }

@@ -211,3 +211,44 @@ async def test_task_runtime_releases_all_resources_on_partial_failure(monkeypatc
     assert closed == ["http", "redis", "engine"], f"资源泄漏：仅归还 {closed}"
 
     _ = (_httpx, _create_engine)  # 保持 import 显式（monkeypatch 目标来自模块属性）
+
+
+async def test_sweep_reports_failed_kicks(db_session_factory) -> None:
+    """(61)（M4.2③）：kick 失败进 failed 账目——单单隔离不再静默吞账（SweepReport 第四账）。"""
+    ok_sid, bad_sid = _sid(), _sid()
+    await _seed_session(db_session_factory, ok_sid)
+    await _seed_session(db_session_factory, bad_sid)
+    ok_aid = await _seed_approval(db_session_factory, ok_sid, status=ApprovalStatus.APPROVED.value)
+    bad_aid = await _seed_approval(db_session_factory, bad_sid, status=ApprovalStatus.APPROVED.value)
+    spy = _KickSpy(fail_sessions={bad_sid})
+    report = await sweep_once(db_session_factory, kick=spy)
+    assert (ok_sid, ok_aid) in report.kicked
+    assert (bad_sid, bad_aid) in report.failed
+    assert (bad_sid, bad_aid) not in report.kicked
+
+
+async def test_sweep_caps_batch_and_logs(db_session_factory, monkeypatch, caplog) -> None:
+    """(61)：扫描批上限（list_expired limit=100 先例）——触顶必留痕，绝不静默截断；
+    余量由下一轮 beat 自愈（每轮从状态重推的红利）。计数断言不认名单（脏库纪律）。"""
+    import logging
+
+    monkeypatch.setattr(hitl, "_SWEEP_LIMIT", 1)
+    for _ in range(2):
+        await _seed_session(db_session_factory, _sid())
+    with caplog.at_level(logging.WARNING, logger="aegis.workers.hitl"):
+        report = await sweep_once(db_session_factory, kick=_KickSpy())
+    assert report.waiting == 1  # 触顶：本轮只领一批
+    assert any("对账扫描达批上限" in r.message for r in caplog.records)
+
+
+async def test_sweep_flags_awaiting_without_any_ticket(db_session_factory, caplog) -> None:
+    """(61)：awaiting 会话零审批单=不可能态——留痕不代管（不可能态留痕纪律归位，
+    站 10 (61) 点名的 `latest is None` 静默 continue 从此有证词）。"""
+    import logging
+
+    sid = _sid()
+    await _seed_session(db_session_factory, sid)
+    with caplog.at_level(logging.WARNING, logger="aegis.workers.hitl"):
+        report = await sweep_once(db_session_factory, kick=_KickSpy())
+    assert any(sid in r.message and "无任何审批单" in r.message for r in caplog.records)
+    assert all(pair[0] != sid for pair in report.kicked)

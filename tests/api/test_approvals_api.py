@@ -11,6 +11,7 @@ owner 视角与 app 视角同貌——RLS 下两工厂的分工由生产装配�
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import httpx
 from pydantic import SecretStr
@@ -59,12 +60,12 @@ class _SpyRuntime(AgentRuntime):
             yield event
 
 
-def _make_app(factory, spy: _SpyRuntime):
+def _make_app(factory, spy: _SpyRuntime, limiter=None):
     return create_app(
         Settings(jwt_secret=SecretStr(SECRET)),
         session_factory=factory,
         runtime=spy,
-        limiter=_Limiter(),
+        limiter=limiter or _Limiter(),
         gateway=_EchoGateway(),
         approvals_lookup=factory,
     )
@@ -261,3 +262,23 @@ async def test_summary_awaiting_when_resume_hits_new_gate(db_session_factory) ->
     body = resp.json()
     assert body["status"] == "awaiting_approval"
     assert (body["next_approval_id"], body["tool_name"]) == ("ap-next", "refund_apply")
+
+
+async def test_decide_rate_limited_429(db_session_factory) -> None:
+    """(56)（M4.2③）：审批是最花钱的入站入口（一次 POST=一整轮 run）——挂租户维度限流。
+
+    链序 401→403→429 先于一切 handler 逻辑：连"单据存不存在"都不该被超限探测出来；
+    恢复入口零触发（spy.calls 空=被拒请求不烧钱）。
+    """
+
+    class _Deny:
+        async def try_take(self, scope, rate, capacity, cost=1.0):
+            return (False, 1.0)
+
+    spy = _SpyRuntime(_EchoGateway(), db_session_factory)
+    app = _make_app(db_session_factory, spy, limiter=_Deny())
+    async with _client(app) as c:
+        resp = await c.post(f"/v1/approvals/ap-none-{uuid4().hex[:6]}", json={"decision": "approve"}, headers=_bearer())
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == "1"
+    assert spy.calls == []

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -182,3 +183,16 @@ async def test_answer_faq_propagates_gateway_error() -> None:
     gw = _RaisingGateway(GatewayExhausted("耗尽"))
     with pytest.raises(GatewayExhausted):
         _ = [p async for p in answer_faq(gw, "你好", tenant_id="tenant-a", session_id="s-1", faq_digest="d")]
+
+
+async def test_parse_failure_leaves_audit_trail(caplog) -> None:
+    """㉓（M4.2③）：零/多词不可靠输出落 AGENT 时留痕——三条通往 AGENT 的路
+    从此条条有痕，"分诊失败率"可观测。只记命中数与长度，不记模型原文
+    （打码纪律：原文可能复述用户消息）。"""
+    gw = _text_gateway("faq或rag")
+    with caplog.at_level(logging.WARNING, logger="aegis.apps.support.intent"):
+        result = await classify(gw, "退货政策？", tenant_id="tenant-a", session_id="s-obs")
+    assert result is Intent.AGENT
+    line = next(r.message for r in caplog.records if "意图解析不可靠" in r.message)
+    assert "hits=2" in line and "len=" in line
+    assert "faq或rag" not in line  # 模型原文不落日志

@@ -32,6 +32,12 @@ router = APIRouter()
 _WAIT_TIMEOUT_S = 25.0
 """活尾单次等待上限：无通知也定期醒来重查（连接活性与降级轮询的公倍口径）。"""
 
+_REPLAY_BATCH = 500
+"""单批回放上限（M4.2③，观察 (74)）：此前首批 `.all()` 无界拉全史。
+events_view 的 _MAX_EVENTS 是调试面截断；本端点是全量重放语义，故只分批
+不截断（silent cap 纪律：一条不少）——批满立刻续扫，终止判据与 message_reset
+都等存量排空后再进。"""
+
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
@@ -126,7 +132,7 @@ async def stream_session(
             "completion_tokens": 0,
             "terminated": False,
         }
-        first_batch = True
+        replay_done = False
         while True:
             async with factory() as s:
                 rows = (
@@ -134,15 +140,18 @@ async def stream_session(
                         select(EventRecord.seq, EventRecord.type, EventRecord.payload)
                         .where(EventRecord.session_id == session_id, EventRecord.seq > cursor)
                         .order_by(EventRecord.seq)
+                        .limit(_REPLAY_BATCH)
                     )
                 ).all()
             for frame in _translate(rows, state):
                 yield encode_frame(frame)
             if rows:
                 cursor = rows[-1].seq
-            if first_batch:
-                first_batch = False
-                # 回放之后、活尾之前：进行中半句整条重推（ADR-007:33/D11；②的
+            if len(rows) == _REPLAY_BATCH:
+                continue  # (74)：存量未尽立刻续扫——绝不带着积压去等通知或早退
+            if not replay_done:
+                replay_done = True
+                # 回放排空之后、活尾之前：进行中半句整条重推（ADR-007:33/D11；②的
                 # "先写缓冲后入帧"顺序承诺在此兑付）。Redis 挂=跳过留痕不拖流
                 if redis is not None:
                     try:
