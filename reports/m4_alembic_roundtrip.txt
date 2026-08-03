@@ -1,0 +1,50 @@
+== alembic 迁移链往返验证（M4.0④b，#4 剩余半边）  2026-08-03 ==
+
+口径：本验证**不进 CI**（downgrade base 会清空业务表含演示种子，且拖长时长）——
+一次性本地执行、结果落本凭证。CI 里常驻的是 `alembic check`（M4.0③ 已进，
+位于 `alembic upgrade head` 之后）。
+
+验的是什么：`alembic check` 只证"当前库与 ORM 元数据一致"，走的是**正向**。
+8 个迁移里有 **4 个是手写 DDL**（RLS 角色与策略 / CREATE EXTENSION + HNSW 索引 /
+mock 两表 + RLS / events AFTER INSERT 触发器），它们的 `downgrade()` 分支
+**在此之前从未被执行过一次**。M4.7 容器化的回滚预案依赖这条能力。
+
+---- 步骤① downgrade base（8 个迁移逐个回滚，全部成功） ----
+d41be6a90c27 -> f4b8d2a97c31   events notify 触发器          （手写）
+f4b8d2a97c31 -> c28efda87e6a   mock backend 模拟业务两表      （手写）
+c28efda87e6a -> 7fe5de25a9ca   documents text 原文列
+7fe5de25a9ca -> c895f9007bf7   documents chunks 摄取两表与向量索引（手写）
+c895f9007bf7 -> 6304edbb4760   rls 低权角色与租户隔离策略      （手写）
+6304edbb4760 -> 74da3bf5d6ab   tenants users 业务底座
+74da3bf5d6ab -> ab31f1ad346e   runtime 五表：事件事实源与投影
+ab31f1ad346e -> (base)         usage_ledger 计量账本
+[结果] 无一失败——四个手写迁移的 downgrade 分支首次执行即全通过
+
+---- 步骤② upgrade head（同 8 个正向重建，全部成功） ----
+(base) -> ab31f1ad346e -> 74da3bf5d6ab -> 6304edbb4760 -> c895f9007bf7
+      -> 7fe5de25a9ca -> c28efda87e6a -> f4b8d2a97c31 -> d41be6a90c27 = head
+[结果] 裸库自举成立（对照：M3.7 起的"影子库"工艺验的也是这条，本次是全链原地复现）
+
+---- 步骤③ alembic check ----
+No new upgrade operations detected.
+[结果] 往返后库与 ORM 仍一致——回滚不是"删干净就行"，重建结果必须与直接 upgrade 等价
+
+---- 步骤④ 种子重建 ----
+语料[tenant-a]：新摄取 10 续传 0 跳过 0
+语料[tenant-b]：新摄取 10 续传 0 跳过 0
+种子完成：tenants=2 users=8 orders=5（upsert，可重复执行）
+
+---- 结论 ----
+✅ 迁移链正反双向均可完整走通，往返后 alembic check 绿。
+✅ 附带坐实一处文档漂移：08 §6.1-bis 记"迁移链 2→**9** 个"，实际为 **8**
+   （其列举从 74da3bf5d6ab 起算，漏了 M1 的 ab31f1ad346e；2 + M3 新增 6 = 8）。
+   本次 8 条 downgrade 记录是实测证据，08 已据此更正。
+
+---- 计划外真实调用记账（必须留痕） ----
+清库使摄取幂等失效（documents 表空 → "未变 DONE 整篇跳过"的省钱闸不触发），
+种子重建时 20 篇语料**全量重新走了真实 embedding API**：
+    usage_ledger  tier=embedding   行数 20   token 2,955   成本 ¥0.001481
+口径说明：M4 真实调用红线（00 §8.0）为"仅 M4.4/M4.6"，本次属**计划外例外**。
+金额可忽略但纪律不可忽略——登记于此，M4.8 毕业对账时计入 M4 真实调用总账。
+教训：**"数据可重建"不等于"重建免费"**——涉及清库的实验，成本核算必须包含
+重建代价（本项目的种子重建恰好绑着一次全量摄取）。
