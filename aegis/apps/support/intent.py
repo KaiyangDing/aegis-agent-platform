@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 from enum import StrEnum
 
+from aegis.apps.support.prompts import FAQ_DIRECT_RULES
 from aegis.gateway.schema import LLMRequest, Message, TextDelta
 from aegis.runtime.runtime import GatewayLike
 
@@ -120,16 +121,14 @@ async def answer_faq(
 ) -> AsyncIterator[str]:
     """FAQ 直答：单次 fast 档调用流式产出文本（02 §2⑤：此路旅程结束，不启动循环）。
 
-    system=faq_digest 原文（来自 tenants.config["faq"]，注入归 M3.8 装配、
-    文案归 M3.11 种子——prompt 政策归租户配置，本函数机制不定政策）。
-    同问重复到达由网关精确缓存直接回放（cache._key 天然带租户前缀隔离，
-    <50ms 验收即此路径）；直答轮写事件（D7）由调用方在服务层做。
-    直答是主路径不是增强层：异常裸传播，处置权归调用方（M3.8/M3.10）。
+    system=faq_digest+平台禁编造规则行（M4.4③ ㉖：digest 政策归租户配置，
+    禁编造是平台底线——SYSTEM_PROMPT 规则 3 的直答版，注入归 M3.8 装配、
+    文案归 M3.11 种子；本函数机制不定政策，但底线不归租户）。
     """
     request = LLMRequest(
         tier="fast",
         messages=[
-            Message(role="system", content=faq_digest),
+            Message(role="system", content=faq_digest + FAQ_DIRECT_RULES),
             Message(role="user", content=question),
         ],
         tenant_id=tenant_id,

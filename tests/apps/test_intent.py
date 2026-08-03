@@ -163,7 +163,10 @@ async def test_answer_faq_streams_text_only() -> None:
 
 
 async def test_answer_faq_request_shape() -> None:
-    """形状钉死：system=faq_digest 原文（prompt 政策归租户配置，机制不定政策）。"""
+    """形状钉死：system=faq_digest+平台禁编造规则行（M4.4③ ㉖——digest 政策归租户，
+    禁编造是平台规则；SYSTEM_PROMPT 规则 3 在直答路径的对应物，M3.12 兜底率闭环补齐另一半）。"""
+    from aegis.apps.support.prompts import FAQ_DIRECT_RULES
+
     gw = _text_gateway("好的")
     stream = answer_faq(gw, "几点营业？", tenant_id="tenant-b", session_id="s-2", faq_digest="digest 原文")
     _ = [p async for p in stream]
@@ -171,7 +174,8 @@ async def test_answer_faq_request_shape() -> None:
     assert req.tier == "fast"
     assert req.tools == []
     assert [m.role for m in req.messages] == ["system", "user"]
-    assert req.messages[0].content == "digest 原文"
+    assert req.messages[0].content.startswith("digest 原文")  # 租户政策仍在首位
+    assert req.messages[0].content == "digest 原文" + FAQ_DIRECT_RULES  # 平台规则行恒拼（I1 引用常量本体）
     assert req.messages[1].content == "几点营业？"
     assert req.tenant_id == "tenant-b"
     assert req.session_id == "s-2"

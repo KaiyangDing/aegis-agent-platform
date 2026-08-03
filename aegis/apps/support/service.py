@@ -177,7 +177,13 @@ class ChatService:
             intent = await classify(self._gateway, message, tenant_id=tenant_id, session_id=session_id)
             faq_digest = str(tenant.config.get("faq") or "")
             if intent is Intent.FAQ and faq_digest and not await self._has_history(session_id):
-                await self._faq_direct(queue, tenant, user_id, session_id, message, faq_digest)
+                # M4.4③ ㊴：直答绕过主 Agent，入口规则库原本全程不在场——这里补上
+                # （未注入分类器=纯规则库零 LLM）；HIGH 回落主循环，loop 侧完整处置
+                # （拒答话术+guardrail_triggered 审计+D10 completed 终止）
+                if (await Guardrails().check_input(message)).refuse:
+                    await self._run_main(queue, tenant, user_id, session_id, message)
+                else:
+                    await self._faq_direct(queue, tenant, user_id, session_id, message, faq_digest)
             elif intent is Intent.HANDOFF:
                 await self._handoff_direct(queue, tenant, user_id, session_id, message)
             else:

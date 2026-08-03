@@ -133,6 +133,17 @@ async def _approval_row(factory, aid: str) -> ApprovalRecord:
         return (await s.execute(select(ApprovalRecord).where(ApprovalRecord.id == aid))).scalar_one()
 
 
+def test_summary_no_op_when_no_events() -> None:
+    """M4.4③ (57)：零事件（T3 输给并发赢家）→ status=no_op 如实报——
+    旧词 "resumed" 暗示"已续跑成功"，账（events=0, reply=None）与词不符。"""
+    from aegis.api.approvals import _summary
+
+    out = _summary("ap-1", "approve", "s-1", [])
+    assert out["status"] == "no_op"
+    assert out["events"] == 0
+    assert out["reply"] is None
+
+
 async def test_missing_token_401(db_session_factory) -> None:
     spy = _SpyRuntime(_EchoGateway(), db_session_factory)
     async with _client(_make_app(db_session_factory, spy)) as c:

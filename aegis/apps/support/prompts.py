@@ -28,3 +28,15 @@ loop_terminated.reason ∈ {max_iterations, token_budget_exceeded} 时补发并�
 
 HANDOFF_REPLY_TEMPLATE = "已为您转接人工客服，工单号 {ticket_id}，会有专员尽快跟进；您也可以继续补充说明。"
 """HANDOFF 直通分支（用户点名转人工）的答复话术（M3.8② service 层消费）。"""
+
+FAQ_DIRECT_RULES = (
+    "\n\n回答规则：只依据以上 FAQ 内容作答；FAQ 里没有的信息（含品牌、供应商、赠品、"
+    "活动、日期、价格等具体事实），明确告知「没有找到相关信息」并建议转人工，"
+    "禁止凭常识或行业惯例推测作答。"
+)
+"""FAQ 直答路的平台禁编造规则（M4.4③ ㉖）：SYSTEM_PROMPT 规则 3 的直答版。
+
+M3.12 兜底率闭环只修好主 Agent 半边——直答 system 原本只有租户 digest，规则 3
+（禁编造）在该路径不生效（站 6 观察 ㉖）。拼接在 digest 之后：租户政策在前、
+平台规则收尾（机制不定政策，但平台底线不归租户配置）。直答路零 cassette 覆盖
+（M4.4 开工实证），本次修订零重录费。"""

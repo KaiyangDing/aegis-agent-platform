@@ -73,7 +73,8 @@ async def _drain(agen: AsyncIterator[AgentEvent]) -> list[AgentEvent]:
 
 def _summary(approval_id: str, decision: str, session_id: str, events: list[AgentEvent]) -> dict[str, Any]:
     """恢复结果 JSON 摘要（M3.10 换帧）：终止→done；续跑又撞新审批闸→awaiting_approval；
-    零事件（T3 输给并发赢家，安静返回）→resumed 空账如实报，不编造结果。"""
+    零事件（T3 输给并发赢家，安静返回）→no_op 空账如实报——旧词 resumed 暗示
+    "已续跑成功"，与账（events=0）不符（M4.4③ (57) 措辞修正，词即语义）。"""
     out: dict[str, Any] = {
         "approval_id": approval_id,
         "decision": decision,
@@ -93,7 +94,7 @@ def _summary(approval_id: str, decision: str, session_id: str, events: list[Agen
             "tool_name": pend["tool_name"],
             "expires_at": pend["expires_at"],
         }
-    return {**out, "status": "resumed", "reply": reply}
+    return {**out, "status": "no_op", "reply": reply}
 
 
 @router.post("/v1/approvals/{approval_id}")
