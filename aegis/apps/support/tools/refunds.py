@@ -13,8 +13,16 @@ from aegis.runtime.tools import SideEffect, ToolContext, tool
 def refund_needs_approval(args: Any, tenant_config: Mapping[str, Any]) -> bool:
     """超过租户审批阈值挂 HITL（01 §5：200 是租户 A 的配置项不是平台常量）。
     谓词只看参数与租户策略——闸门里没有 ctx：归属是权限（handler 内 fail-closed），
-    风险是闸门（放行但要人批），两道防线不混（§4.7 陷阱 3）。"""
-    return bool(args.amount > tenant_config.get("approval_threshold", 200))
+    风险是闸门（放行但要人批），两道防线不混（§4.7 陷阱 3）。
+
+    **缺省 0 = fail-closed**（M4.0② ㊲ 改判，原缺省 200）：租户 config 少这个键时
+    语义是"任意正金额都要人批"，而不是"200 元以下静默直退"（无审批无告警无痕迹）。
+    原缺省与 00 §2.2「安全闸门 fail-closed」直接冲突，且同族 `coupon_needs_approval`
+    缺省 0 早就是这个方向——同类闸门对同一种故障（少一个键）给相反答案，而只有
+    coupon 那条被论证过。可达性不低：#21 治理路径下"种子即初始化入口"，新租户漏配
+    是现实运维事故。缺省不再冒充一个业务阈值：0 与"配了 200"不会被混为一谈。
+    """
+    return bool(args.amount > tenant_config.get("approval_threshold", 0))
 
 
 @tool(side_effect=SideEffect.WRITE, risk_policy=refund_needs_approval)

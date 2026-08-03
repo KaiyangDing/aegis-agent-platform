@@ -55,12 +55,27 @@ def _risk(tool: ToolDef, config: dict[str, Any], **kw: Any) -> bool:
 
 
 def test_refund_threshold_boundary_200() -> None:
-    """阈值语义=严格大于（§4.7 测试蓝图点名 200/200.01）：等于阈值不挂审批；缺省 200。"""
+    """阈值语义=严格大于（§4.7 测试蓝图点名 200/200.01）：等于阈值不挂审批。
+
+    缺省值语义见 test_refund_threshold_default_is_fail_closed（M4.0② ㊲ 改判）。
+    """
     cfg = {"approval_threshold": 200}
     assert _risk(refund_apply, cfg, order_id="o", amount=200.0) is False
     assert _risk(refund_apply, cfg, order_id="o", amount=200.01) is True
-    assert _risk(refund_apply, {}, order_id="o", amount=199.99) is False  # 缺省 200
-    assert _risk(refund_apply, {}, order_id="o", amount=200.01) is True
+
+
+def test_refund_threshold_default_is_fail_closed() -> None:
+    """M4.0② ㊲：租户 config 缺 approval_threshold → 任意正金额都挂审批。
+
+    改判前缺省 200 是 fail-OPEN：新租户漏配 = 200 元以下静默直退（无审批无告警无痕迹），
+    与 00 §2.2「安全闸门 fail-closed」直接冲突，且同族 coupon_needs_approval 缺省 0
+    是 fail-closed——同一类闸门对同一种故障（少一个键）行为相反，只有 coupon 那条被
+    论证过。可达性不低：#21 治理路径下种子即初始化入口，漏配是现实运维事故。
+    """
+    assert _risk(refund_apply, {}, order_id="o", amount=0.01) is True
+    assert _risk(refund_apply, {}, order_id="o", amount=199.99) is True
+    # 显式配 0 与"缺键"同义，且不与"配了 200"混淆——缺省不再冒充一个业务阈值
+    assert _risk(refund_apply, {"approval_threshold": 0}, order_id="o", amount=0.01) is True
 
 
 def test_coupon_threshold_default_zero_fail_closed() -> None:
