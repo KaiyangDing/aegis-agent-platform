@@ -1,7 +1,7 @@
-# 离线评测批次报告 batch=61399c3cccde4a8c88339941e84cff2d（2026-08-03）
-用例 20/20；token 实测累计 28650/150000
-- adversarial: 10/10 通过
-- e2e: 7/7 通过
-- retrieval: 3/3 通过
+# 离线评测批次报告 batch=3a8eb8b80a2c4fcf9d80d7c9d801f390（2026-08-03）
+用例 40/40；token 实测累计 50754/150000
+- adversarial: 14/14 通过
+- e2e: 13/14 通过
+- retrieval: 12/12 通过
 judge 模型分布：['qwen3.7-max']（C36 回显名）
 注：retrieval 类 embedding 花销为分币级未入行账，usage_ledger 有总量。

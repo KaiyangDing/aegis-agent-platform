@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "session_id": "l3-iso-rag-13c77124",
+  "session_id": "l3-iso-rag-25a907a3",
   "scopes": {
     "main": [
       {
@@ -11,7 +11,7 @@
             "order_query",
             "coupon_grant"
           ],
-          "prompt_sha256": "4a67e8acf22a006f6ca59a69d54dc4fc23bd61585f795ac5b082ba2fdb2167c9"
+          "prompt_sha256": "6ada91748f32204e66bae2f74f53f01eafa0a2b2075d046579dfa3485228cdf3"
         },
         "chunks": [
           {
@@ -32,63 +32,23 @@
           },
           {
             "type": "text_delta",
-            "text": "政策，我查询了"
+            "text": "政策，我的知识库中"
           },
           {
             "type": "text_delta",
-            "text": "云杉生鲜超市的知识"
+            "text": "没有相关信息。\n\n建议您："
           },
           {
             "type": "text_delta",
-            "text": "库和可用工具，但"
+            "text": "\n- 查看产品包装"
           },
           {
             "type": "text_delta",
-            "text": "未找到该商品的相关"
+            "text": "盒或说明书内的保修说明"
           },
           {
             "type": "text_delta",
-            "text": "信息。\n\n云杉生鲜超市"
-          },
-          {
-            "type": "text_delta",
-            "text": "主要经营生鲜食品、日"
-          },
-          {
-            "type": "text_delta",
-            "text": "用百货等品类，暂"
-          },
-          {
-            "type": "text_delta",
-            "text": "无「灵犀降"
-          },
-          {
-            "type": "text_delta",
-            "text": "噪耳机 Pro」这一"
-          },
-          {
-            "type": "text_delta",
-            "text": "电子数码类商品的销售"
-          },
-          {
-            "type": "text_delta",
-            "text": "记录或保修说明。\n\n建议"
-          },
-          {
-            "type": "text_delta",
-            "text": "您：\n- 确认"
-          },
-          {
-            "type": "text_delta",
-            "text": "该商品是否由云"
-          },
-          {
-            "type": "text_delta",
-            "text": "杉生鲜超市官方渠道"
-          },
-          {
-            "type": "text_delta",
-            "text": "销售；\n- 或联系该"
+            "text": "；\n- 或联系该"
           },
           {
             "type": "text_delta",
@@ -96,19 +56,19 @@
           },
           {
             "type": "text_delta",
-            "text": "的保修政策。\n\n如需"
+            "text": "的保修条款。\n\n如需进一步"
           },
           {
             "type": "text_delta",
-            "text": "进一步协助，请提供订单"
+            "text": "协助（例如查询您的"
           },
           {
             "type": "text_delta",
-            "text": "号或说明购买渠道，"
+            "text": "订单是否含该商品"
           },
           {
             "type": "text_delta",
-            "text": "我可帮您核实"
+            "text": "），请提供订单号"
           },
           {
             "type": "text_delta",
@@ -117,8 +77,8 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 530,
-            "completion_tokens": 123,
+            "prompt_tokens": 540,
+            "completion_tokens": 67,
             "cached": false
           },
           {

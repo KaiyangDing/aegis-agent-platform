@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "session_id": "l3-tool-13c77124",
+  "session_id": "l3-tool-25a907a3",
   "scopes": {
     "main": [
       {
@@ -13,7 +13,7 @@
             "refund_apply",
             "ticket_create"
           ],
-          "prompt_sha256": "fd6ce4e8dbdf60cab494cd03281eb80fa12a050ebe3a802b73e504130ddb68c0"
+          "prompt_sha256": "82c7896c6eb345ed703a117acf87b019fded543bfa3e7dbe9507d7e4b58362fe"
         },
         "chunks": [
           {
@@ -39,7 +39,7 @@
           {
             "type": "tool_call",
             "tool_call": {
-              "id": "call_5482d3af7e444a389c2578",
+              "id": "call_9d3a3262c8a1484c86908b",
               "name": "order_query",
               "arguments_json": "{\"order_id\": \"AZ-1001\"}"
             }
@@ -47,7 +47,7 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 741,
+            "prompt_tokens": 751,
             "completion_tokens": 41,
             "cached": false
           },
@@ -67,7 +67,7 @@
             "refund_apply",
             "ticket_create"
           ],
-          "prompt_sha256": "2d55c4bb526972af29cc0b6bf0f8876bb03d40580d7b22a6d5b6ef65f34fec6b"
+          "prompt_sha256": "4e8c8b6e0c9d86f27bea6c44616c598b65cecd3be25825f164e67100c237ca64"
         },
         "chunks": [
           {
@@ -76,15 +76,11 @@
           },
           {
             "type": "text_delta",
-            "text": " AZ"
+            "text": " AZ-1"
           },
           {
             "type": "text_delta",
-            "text": "-10"
-          },
-          {
-            "type": "text_delta",
-            "text": "01 当前状态为"
+            "text": "001 当前状态为"
           },
           {
             "type": "text_delta",
@@ -112,15 +108,15 @@
           },
           {
             "type": "text_delta",
-            "text": "026-07"
+            "text": "026年8月3"
           },
           {
             "type": "text_delta",
-            "text": "-27。\n\n如需查询"
+            "text": "日。  \n\n如需查询"
           },
           {
             "type": "text_delta",
-            "text": "物流信息或有其他需求"
+            "text": "物流信息或进一步操作"
           },
           {
             "type": "text_delta",
@@ -129,8 +125,8 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 906,
-            "completion_tokens": 69,
+            "prompt_tokens": 916,
+            "completion_tokens": 68,
             "cached": false
           },
           {

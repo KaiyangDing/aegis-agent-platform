@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "session_id": "l3-hitl-13c77124",
+  "session_id": "l3-hitl-25a907a3",
   "scopes": {
     "main": [
       {
@@ -13,7 +13,7 @@
             "refund_apply",
             "ticket_create"
           ],
-          "prompt_sha256": "fbb32469ba6d6e2d48e74f8980b61f5f285b4b59e20c8381fce5269a0e29c0e8"
+          "prompt_sha256": "42e6b5b4f035f2119ac663787e3674698b60792b9508a100d68b57a2bdcf46f0"
         },
         "chunks": [
           {
@@ -34,7 +34,7 @@
           },
           {
             "type": "text_delta",
-            "text": "商品和支付金额，再"
+            "text": "商品和支付信息后"
           },
           {
             "type": "text_delta",
@@ -43,7 +43,7 @@
           {
             "type": "tool_call",
             "tool_call": {
-              "id": "call_2457590b7885431db3afae",
+              "id": "call_d9754dfe0ec8454cb59b16",
               "name": "order_query",
               "arguments_json": "{\"order_id\": \"AZ-1002\"}"
             }
@@ -51,8 +51,8 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 745,
-            "completion_tokens": 50,
+            "prompt_tokens": 755,
+            "completion_tokens": 49,
             "cached": false
           },
           {
@@ -71,61 +71,65 @@
             "refund_apply",
             "ticket_create"
           ],
-          "prompt_sha256": "807bc00ddc0180549079076e3b4f8b53ee7de93f7ef78ad09a8b446a0a5d9cb8"
+          "prompt_sha256": "84324c8a166866b6fad051aeff1ab863d5c6e2f5c10e443bea90a1e64b26c742"
         },
         "chunks": [
           {
             "type": "text_delta",
-            "text": "已"
+            "text": "订单"
           },
           {
             "type": "text_delta",
-            "text": "确认订单 AZ"
+            "text": " AZ"
           },
           {
             "type": "text_delta",
-            "text": "-1002"
+            "text": "-10"
           },
           {
             "type": "text_delta",
-            "text": " 状态为「已签"
+            "text": "02 状态为「"
           },
           {
             "type": "text_delta",
-            "text": "收」，商品为 R"
+            "text": "已签收」，"
           },
           {
             "type": "text_delta",
-            "text": "68 Pro 路由"
+            "text": "实付金额 599"
           },
           {
             "type": "text_delta",
-            "text": "器，实付金额为"
+            "text": ".00 元，"
           },
           {
             "type": "text_delta",
-            "text": " 599.0"
+            "text": "商品为 R68 Pro"
           },
           {
             "type": "text_delta",
-            "text": "0 元，与您申请"
+            "text": " 路由器（1"
           },
           {
             "type": "text_delta",
-            "text": "的退款金额一致。"
+            "text": "件），符合全额退款条件"
           },
           {
             "type": "text_delta",
-            "text": "\n\n现在为您提交退款申请"
+            "text": "。\n\n现在为您提交退款申请"
           },
           {
             "type": "text_delta",
-            "text": "：\n\n"
+            "text": "，金额为 59"
+          },
+          {
+            "type": "text_delta",
+            "text": "9 元：\n\n"
           },
           {
             "type": "tool_call",
             "tool_call": {
-              "id": "call_a19602cbca0644ff92f992",
+              "id": "call_bbb0221e5a734f8b986ba4",
               "name": "refund_apply",
               "arguments_json": "{\"order_id\": \"AZ-1002\", \"amount\": 599}"
             }
@@ -133,8 +137,8 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 918,
-            "completion_tokens": 91,
+            "prompt_tokens": 927,
+            "completion_tokens": 97,
             "cached": false
           },
           {
@@ -153,7 +157,7 @@
             "refund_apply",
             "ticket_create"
           ],
-          "prompt_sha256": "c78e4e5ff8678ed06df203997e06e6eab12170fd832655104ec2ca05b71f905a"
+          "prompt_sha256": "63158459008a6a88c979c026d36ddab7c519c3150eec5b555d250541881514fa"
         },
         "chunks": [
           {
@@ -162,15 +166,11 @@
           },
           {
             "type": "text_delta",
-            "text": "已"
+            "text": "已成功提交"
           },
           {
             "type": "text_delta",
-            "text": "成功处理"
-          },
-          {
-            "type": "text_delta",
-            "text": "。订单 AZ-10"
+            "text": "，订单 AZ-10"
           },
           {
             "type": "text_delta",
@@ -178,19 +178,19 @@
           },
           {
             "type": "text_delta",
-            "text": " 元已全额退还"
+            "text": " 元将原路"
           },
           {
             "type": "text_delta",
-            "text": "至您的原支付账户，"
+            "text": "退回至您的支付账户"
           },
           {
             "type": "text_delta",
-            "text": "预计1–3个工作日内"
+            "text": "，预计1–3个工作日"
           },
           {
             "type": "text_delta",
-            "text": "到账。\n\n如有其他问题"
+            "text": "到账。如有其他问题"
           },
           {
             "type": "text_delta",
@@ -199,8 +199,8 @@
           {
             "type": "usage",
             "model": "qwen-plus",
-            "prompt_tokens": 1113,
-            "completion_tokens": 44,
+            "prompt_tokens": 1128,
+            "completion_tokens": 43,
             "cached": false
           },
           {

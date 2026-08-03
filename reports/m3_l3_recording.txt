@@ -1,17 +1,17 @@
 M3.11 L3 行为 cassette 录制凭证（真实调用，预算三上限写死本脚本；M4.3 CI 回归输入）
-录制时间：2026-07-27T01:34:23；RUN_TAG=13c77124
-总账（五会话 LLM 账本行）：tokens=7063 cost=¥0.006291 calls=8（上限 100000/2.00/40）
+录制时间：2026-08-03T17:51:52；RUN_TAG=25a907a3
+总账（五会话 LLM 账本行）：tokens=7125 cost=¥0.006307 calls=8（上限 100000/2.00/40）
 账本 distinct 模型名：['qwen-plus']
 口径注记：录制关缓存（CACHE_TTL_SECONDS=0）；盘 1 查询侧 embedding 计租户不计会话（量级 <10 token）；
   spec 从 seed_demo.TENANTS 常量构造（I1）——回放冒烟同源，见 tests/apps/test_l3_cassette_smoke.py。
 
-[isolation_cross_tenant_rag] session=l3-iso-rag-13c77124 各道条目={'main': 1}
-    自检：PASS；兜底回答：'关于「灵犀降噪耳机 Pro」的保修政策，我查询了云杉生鲜超市的知识库和可用工具，但未找到该商品的相关信息。\n\n云杉生鲜超'
-[isolation_cross_user_refund] session=l3-iso-refund-13c77124 各道条目={'main': 2}
+[isolation_cross_tenant_rag] session=l3-iso-rag-25a907a3 各道条目={'main': 1}
+    自检：PASS；兜底回答：'关于「灵犀降噪耳机 Pro」的保修政策，我的知识库中没有相关信息。\n\n建议您：\n- 查看产品包装盒或说明书内的保修说明；'
+[isolation_cross_user_refund] session=l3-iso-refund-25a907a3 各道条目={'main': 2}
     自检：PASS；工具序列 ['order_query']
-[budget_token_exceeded] session=l3-budget-13c77124 各道条目={}（预检零调用）
+[budget_token_exceeded] session=l3-budget-25a907a3 各道条目={}（预检零调用）
     自检：PASS；预检零调用触发（闸门 #3）
-[hitl_approve_resume] session=l3-hitl-13c77124 各道条目={'main': 3}
+[hitl_approve_resume] session=l3-hitl-25a907a3 各道条目={'main': 3}
     自检：PASS；挂起→批准→续跑→订单 refunded
-[tool_roundtrip_order_query] session=l3-tool-13c77124 各道条目={'main': 2}
+[tool_roundtrip_order_query] session=l3-tool-25a907a3 各道条目={'main': 2}
     自检：PASS；工具序列 ['order_query']
