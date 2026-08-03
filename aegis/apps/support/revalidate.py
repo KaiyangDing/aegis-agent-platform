@@ -28,6 +28,19 @@ logger = logging.getLogger(__name__)
 Revalidator = Callable[[SessionFactory, Mapping[str, Any]], Awaitable[str | None]]
 """单工具校验谓词：None=通过 / str=拒因；factory 由 build_precheck 闭包供给。"""
 
+_STALE_TEXT = "订单当前状态不满足该操作的执行条件，已取消执行。"
+"""订单派生拒因的统一话术（M4.0② 候选②）。
+
+本层签名里没有 ctx（PrecheckHook 冻结面）——它读得到订单，却不知道请求者是谁。
+拿不到身份的层，说出口的每句话都必须对**所有**身份安全（站 10 口径⑴）。
+三种订单派生失败（不存在／已退款／超上限）若彼此可区分，合起来就是一个
+存在性 + 状态 + 金额的 oracle：风险闸门在 handler **之前**（executor.py:148
+vs :186），故"越权 + 超阈值"会先挂审批单，坐席批准后拒因经 SYSTEM_PROMPT
+规则 4「如实转达」复述给用户——绕过 `_shared.DENIED_TEXT` 三路同话术的设计。
+执行面本就安全（handler 内 fetch_owned_order 照样挡住，站 8 口径⑵），
+本常量堵的是信息面。细节不丢：全部进 logger.warning，审计与排障照旧。
+"""
+
 
 def _as_positive_decimal(value: Any) -> Decimal | None:
     """快照字段不可信：非数/非正一律 None——校验器自己的入参防线。"""
@@ -47,26 +60,38 @@ async def _load_order(factory: SessionFactory, order_id: str) -> MockOrderRecord
 
 async def _revalidate_refund(factory: SessionFactory, args: Mapping[str, Any]) -> str | None:
     """退款新鲜度：订单在场、未退款、金额不超可退上限——与 mock 拒绝面逐字对齐
-    （_execute_refund：status 终态与金额上限两道），拒绝面口径一处不漂移。"""
-    order = await _load_order(factory, str(args.get("order_id", "")))
+    （_execute_refund：status 终态与金额上限两道），拒绝面口径一处不漂移。
+
+    订单派生的三种失败一律回 _STALE_TEXT（候选②）；金额形状是**参数事实**，
+    不泄露任何订单信息，故保持具体反馈。
+    """
+    order_id = str(args.get("order_id", ""))
+    order = await _load_order(factory, order_id)
     if order is None:
-        return "订单不存在或不可见"
+        logger.warning("前置校验拒绝（订单不存在或不可见）：order=%s", order_id)
+        return _STALE_TEXT
     if order.status == MockOrderStatus.REFUNDED.value:
-        return "订单已退款，不能重复退款"
+        logger.warning("前置校验拒绝（订单已退款）：order=%s", order_id)
+        return _STALE_TEXT
     amount = _as_positive_decimal(args.get("amount"))
     if amount is None:
         return "退款金额非法（须为正数）"
     if amount > order.paid_amount:
-        return f"退款金额超过可退上限 {order.paid_amount}"
+        logger.warning("前置校验拒绝（超可退上限）：order=%s amount=%s limit=%s", order_id, amount, order.paid_amount)
+        return _STALE_TEXT
     return None
 
 
 async def _revalidate_coupon(factory: SessionFactory, args: Mapping[str, Any]) -> str | None:
     """补发新鲜度：订单在场、面额合法即可——mock 侧补发不看订单状态（_execute_coupon），
-    校验器不比业务系统更严：多拦=批准后白拒，口径以下游为准。"""
-    order = await _load_order(factory, str(args.get("order_id", "")))
+    校验器不比业务系统更严：多拦=批准后白拒，口径以下游为准。
+    订单派生拒因同 _revalidate_refund 走统一话术（候选②）。
+    """
+    order_id = str(args.get("order_id", ""))
+    order = await _load_order(factory, order_id)
     if order is None:
-        return "订单不存在或不可见"
+        logger.warning("前置校验拒绝（订单不存在或不可见）：order=%s", order_id)
+        return _STALE_TEXT
     if _as_positive_decimal(args.get("amount")) is None:
         return "补发面额非法（须为正数）"
     return None
