@@ -40,14 +40,20 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # M4.0③（#24）：gitleaks 必须扫全历史——只扫最新提交等于漏掉"密钥曾经进过历史"，
-          # 而那正是唯一救不回来的情形（进过历史只能作废换 key，07 §3 第 2/6 条）
+          # 全历史可用（PR 事件下 gitleaks 扫 base..head 需要它）。
+          # ⚠️ M4.0④b 实测更正：**push 事件下 action 只扫本次推送的 commit**
+          # （日志实证 `gitleaks detect --log-opts=-1` → `git log -p -U0 -1`），
+          # 故 fetch-depth: 0 对 push 事件几乎无用。含义=**新引入的密钥必被抓（主防线）、
+          # 但历史遗留的不会被重扫**。历史面靠一次性全量扫描兜底：M4.0④b 已本地跑过
+          # `gitleaks detect`（149 commits），命中 6 处全为测试假串、零真实密钥，
+          # 已按串形态精确豁免（.gitleaks.toml）。
           fetch-depth: 0
 
       # 阻断式密钥扫描（评审 C32 / 00 §10.1 #24）：置于 checkout 之后第一道——
       # 后面每一步都可能把仓库内容打进日志，扫描要跑在它们之前。
-      # 豁免面在仓库根 .gitleaks.toml，每条豁免须写明理由。
-      - name: 密钥扫描（gitleaks，全历史）
+      # 阻断性实证：action 跑的是 `--exit-code=2`，有 leak 即非零退出 → 步骤失败 → workflow 红。
+      # 豁免面在仓库根 .gitleaks.toml（日志确认被读到并 extend 默认规则集），每条豁免须写明理由。
+      - name: 密钥扫描（gitleaks，增量：本次推送的 commit）
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
