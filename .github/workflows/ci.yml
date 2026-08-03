@@ -38,7 +38,7 @@ jobs:
     steps:
       # action 钉到完整 commit SHA：tag 可被上游重指恶意提交，SHA 不可变（审计加固 B）
       - name: 检出代码
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # 全历史可用（PR 事件下 gitleaks 扫 base..head 需要它）。
           # ⚠️ M4.0④b 实测更正：**push 事件下 action 只扫本次推送的 commit**
