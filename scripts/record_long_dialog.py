@@ -181,7 +181,7 @@ PROBES: tuple[tuple[int, str], ...] = (
     (40, FACT_TIME),
 )
 
-_NORM_STRIP = re.compile(r"[-\s]")
+_NORM_STRIP = re.compile(r"[-–—\s]")  # M4.5③：+en/em-dash——iso-12 实录"1–3个工作日"绕过"1-3 个工作日"禁词的字符形态盲区
 _SECRET_RE = re.compile(r"sk-[A-Za-z0-9_-]{8,}")
 
 

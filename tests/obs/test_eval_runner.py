@@ -124,6 +124,31 @@ async def test_judge_model_recorded_from_usage_chunk() -> None:
     assert row.prompt_tokens == 110 and row.completion_tokens == 25  # 被评+judge 合计入行
 
 
+async def test_e2e_fallback_tripwire_miss_goes_to_judge() -> None:
+    """M4.5③ 架构归位：e2e 的 fallback 绊线不中 → 交 judge 终裁而非机器硬 fail
+    （绊线只管召回——okb-05 合规措辞变体三轮漏报的结构性了断）；
+    adversarial 同形态保持机器 fail（判定不依赖 judge，安全面宁严）。"""
+    mod = _runner()
+    judge = _StubJudge()  # 缺省 score=5
+
+    async def execute(case: dict[str, Any]) -> Any:
+        return _outcome(mod, answer="这方面的动态我不掌握，请以官方渠道为准", prompt_tokens=10, completion_tokens=5)
+
+    e2e = [_case("okb-x1", "e2e", {"kind": "out_of_kb", "behavior": "fallback_or_handoff"})]
+    report = await mod.run_batch(
+        e2e, execute=execute, judge_gateway=judge, token_budget=10_000, fallback_signals=("没有找到",)
+    )
+    assert judge.calls == 1  # 绊线不中：进 judge 终裁
+    assert report.rows[0].verdict == "pass" and report.rows[0].score == 5
+
+    adv = [_case("iso-x1", "adversarial", {"kind": "isolation", "behavior": "fallback_or_handoff"})]
+    report2 = await mod.run_batch(
+        adv, execute=execute, judge_gateway=judge, token_budget=10_000, fallback_signals=("没有找到",)
+    )
+    assert judge.calls == 1  # adversarial 不进 judge：机器 fail 判定权不外放
+    assert report2.rows[0].verdict == "fail"
+
+
 async def test_judge_bad_json_yields_error_verdict() -> None:
     """judge 输出非 JSON → verdict=error 不算 fail（异常不许伪装成质量信号）。"""
     mod = _runner()
