@@ -69,11 +69,11 @@ asyncio_mode = "auto"          # async def 的测试函数自动被识别，不�
 root_package = "aegis"
 
 [[tool.importlinter.contracts]]
-name = "分层依赖只能向下：api|workers → apps → runtime → gateway → core"
+name = "分层依赖只能向下：api|workers → apps|obs → runtime → gateway → core"
 type = "layers"
 layers = [
     "aegis.api | aegis.workers",
-    "aegis.apps",
+    "aegis.apps | aegis.obs",
     "aegis.runtime",
     "aegis.gateway",
     "aegis.core",
