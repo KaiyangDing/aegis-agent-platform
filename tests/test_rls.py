@@ -8,7 +8,9 @@ create_all 不建角色/策略，本地首跑必先迁移（CI 步序 alembic→
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
@@ -543,3 +545,84 @@ async def test_cross_tenant_session_id_collision_returns_404_not_500(rls_engine,
     async with owner_engine.connect() as conn:
         owner_tid = (await conn.execute(text("SELECT tenant_id FROM sessions WHERE id = 's-rls-b'"))).scalar_one()
     assert owner_tid == "rls-t-b"
+
+
+# ---------------------------------------------------------------------------
+# M4.1② 增量节：trace 端点在 RLS 在场世界的 admin 跨租视图——(58) 防线的 CI 证人
+# ---------------------------------------------------------------------------
+# 风险本体：usage_ledger 在 RLS 名单内，而 auth 对**所有角色**无差别把 ContextVar
+# 设为观察者的租户（auth.py:144）。admin 跨租查 trace 时，若账本聚合不显式
+# `tenant_context(会话租户)` 覆盖（obs/trace.py 装配器末段），SUM 会被 RLS 过滤成
+# 空集且**零报错**——"有账变没账"的静默降级（usage.py:65-67 同款前提；观察池
+# (58) 家族）。owner 世界的常规测试对此天然失明（#47），故证人必须住在本文件。
+# events 表不受此影响（无 tenant_id 列、不在 RLS 名单——P5），一并在本测内核证。
+
+
+@pytest.fixture
+async def trace_rls_seeded(rls_ready, owner_engine):
+    """给 s-rls-b（租户 rls-t-b）种一条事件与一条账本行（owner 面、过滤式清理）。"""
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("DELETE FROM usage_ledger WHERE request_id LIKE 'rq-rls-%'"))
+        await conn.execute(text("DELETE FROM events WHERE session_id LIKE 's-rls-%'"))
+        await conn.execute(
+            text(
+                "INSERT INTO events (id, session_id, run_id, seq, type, schema_version, payload) "
+                "VALUES ('ev-rls-1', 's-rls-b', 'run-rls-1', 1, 'assistant_message', 1, CAST(:payload AS jsonb))"
+            ),
+            {"payload": json.dumps({"content": "已登记手机号 13812345678。"}, ensure_ascii=False)},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO usage_ledger (request_id, tenant_id, session_id, tier, provider, model, "
+                "prompt_tokens, completion_tokens, cached, cost) "
+                "VALUES ('rq-rls-1', 'rls-t-b', 's-rls-b', 'standard', 'bailian', 'm-rls', 100, 50, false, 0.002)"
+            )
+        )
+    yield
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("DELETE FROM usage_ledger WHERE request_id LIKE 'rq-rls-%'"))
+        await conn.execute(text("DELETE FROM events WHERE session_id LIKE 's-rls-%'"))
+
+
+async def test_admin_cross_tenant_trace_usage_visible_under_rls(rls_engine, owner_engine, trace_rls_seeded) -> None:
+    """admin（租户 a）看租户 b 的 trace：事件在场、payload 已打码、**账本聚合非空**。
+
+    去掉装配器里的 tenant_context 包裹时，本条立刻红在 usage.requests==0——
+    观察者上下文（auth 设的 rls-t-a）会让 RLS 把 b 的账本行静默过滤掉。
+    """
+    import httpx
+    from pydantic import SecretStr
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from aegis.api.auth import issue_token
+    from aegis.api.main import create_app
+    from aegis.api.notify import EventNotifier
+    from aegis.core.config import Settings
+    from aegis.core.tenancy import Role
+    from aegis.runtime.runtime import AgentRuntime
+
+    secret = "m4-rls-probe-secret-key-32bytes-min!!"
+    app_factory = async_sessionmaker(rls_engine, expire_on_commit=False)
+    owner_factory = async_sessionmaker(owner_engine, expire_on_commit=False)
+    gw = _NullGateway()
+    app = create_app(
+        Settings(jwt_secret=SecretStr(secret)),
+        session_factory=app_factory,
+        runtime=AgentRuntime(gw, app_factory),
+        limiter=_Limiter(),
+        gateway=gw,
+        approvals_lookup=owner_factory,  # 生产同形：平台视角查读缝
+        notifier=EventNotifier("postgresql+asyncpg://unused/unused", poll_interval_s=0.05),
+        msg_redis=None,
+    )
+    token = issue_token(user_id="admin-rls", tenant_id="rls-t-a", role=Role.ADMIN, ttl_s=3600, secret=secret)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/v1/sessions/s-rls-b/events", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, f"admin 平台级 trace 不成立：{resp.status_code} {resp.text}"
+    body = resp.json()
+    assert body["tenant_id"] == "rls-t-b"
+    content = body["runs"][0]["events"][0]["payload"]["content"]
+    assert "***phone_cn***" in content  # 打码在 RLS 世界同样生效（出口单点与世界无关）
+    assert "13812345678" not in content
+    assert body["usage"]["requests"] == 1  # (58) 防线本体：不包 tenant_context 这里是 0
+    assert Decimal(body["usage"]["cost"]) == Decimal("0.002")
