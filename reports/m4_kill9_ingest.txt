@@ -1,0 +1,15 @@
+== 摄取链路 kill -9 实录  document=kill9-doc-1785761955 ==
+假 embedding 端点 http://127.0.0.1:8799（每批延迟 3.0s）；broker=redis://localhost:6379/0
+实验尺度：visibility_timeout=60s（生产取 Redis transport 默认 3600s）——acks_late 只管不提前 ack，放回队列的是这个超时；调小仅为可观测，仍远大于本实验任务时长 ≈9s（#48 的下限论证）
+worker 已拉起（pid=36120），等待就绪…
+任务已投递，等待第一批向量落库…
+worker 已 kill -9（pid=36120）；此刻 总块=25 已回填=10
+[断言0] 崩溃现场 PROCESSING 且部分回填（status=processing 10/25）: PASS
+[断言1] 消息未丢，仍在 unacked（unacked=1 队列=0）: PASS
+等待 65s 越过 visibility_timeout，然后手动触发 restore（Linux 由定时器代劳）…
+restore 已触发：回到队列 1 条
+重启 worker，等待重新消费…
+[断言2] restore 后重新消费至 DONE 且 chunk_count 正确（status=done count=25 块=25 回填=25 假服务调用 2→4 批）: PASS
+[断言3] 账本重复 ≤1 批（embedding 行=3，理论批数=3）: PASS
+== 结论：全部 PASS —— 消息不丢 + restore 后幂等消费收敛 ==
+== 未覆盖：定时器自动触发 restore（Windows 无 event loop，celery should_use_eventloop 显式排除本平台）——挂 M4.7 Linux 容器复验 ==

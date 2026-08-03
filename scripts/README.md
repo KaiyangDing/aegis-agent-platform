@@ -27,6 +27,9 @@
 | `demo_degraded_redis_lock.py` | 停 Redis 锁降级实录：并发恰一互斥 | M2.12 | 否 | PG（Redis 手动停） |
 | `demo_stop_pg_midrun.py` | 停 PG 半途实录：退避耗尽明确终止 + write-ahead 核验 | M2.12 | 否 | PG（中途手动停） |
 | `experiment_kill9_recovery.py` | kill -9 → reaper 认领 → 续跑，四断言凭证；结束自清理演示行 | M2.10 | 否 | PG/Redis |
+| `experiment_kill9_ingest.py` | **摄取链路** kill -9 四断言（#48 的"配置改了≠行为验证了"）：崩溃现场 PROCESSING+部分回填 / 消息不丢仍在 unacked / 越过 visibility_timeout 后 restore→重新消费至 DONE / 账本重复 ≤1 批。**实测发现**：Windows 上 celery 恒无 event loop（`should_use_eventloop` 排除本平台，与 pool 无关）→ unacked **永不自动重投**，故本脚本手动触发 restore，自动那一环挂 M4.7 Linux 复验 | M4.0④b | 否（假 embedding 服务顶替上游） | PG/Redis + 迁移 + `fake_embedding_server.py` 在跑 |
+| `fake_embedding_server.py` | 确定性假 embedding 端点（`DASHSCOPE_BASE_URL` 指向它即可，生产代码零改动）：同文本恒同向量、协议面按 `EmbeddingClient._post_once` 逐条对齐、`FAKE_EMBED_DELAY_S` 给 kill 留窗口、每批调用落跨进程账本 | M4.0④b | 否（**它就是零真实调用的实现手段**） | 无（独立进程） |
+| `kill9_celery_app.py` | kill -9 实录专用 Celery app：复用生产 app 与全部生产任务体，只把 `visibility_timeout` 由默认 3600s 调到 60s（实验时间尺度，同 M2.9/M2.10 注入时钟手法） | M4.0④b | 否 | 由实录脚本自动拉起 |
 | `demo_tools_acceptance.py` | 工具五件真实链路三幕：Agent 查单退款 / 双击去重(#6) / 对抗③统一话术；演示订单 upsert 自带+自清理 | M3.7④ | **是**（<¥0.01，单次 Agent run） | PG/Redis + 迁移 + 种子 + `.env` key |
 | `demo_chat_acceptance.py` | 完整客服链路三幕（生产装配原件 create_app）：租户 A 查单退款直执 / **FAQ 守卫实证**（首问直答·跟进问进主 Agent）/ 租户工具面白名单 | M3.8③ | **是**（<¥0.02，≈5 次调用） | PG/Redis + 迁移 + **M3.8③ 版种子** + `.env` key |
 | `demo_hitl.ps1` | **HITL 业务闭环六段**（M3.9 验收面，走 HTTP API+curl.exe）：挂起提示 / 对抗④ 403 / 批准→#8 重跑→执行→续跑（重复决策 409）/ **TOCTOU 否决实证**（批准落锤前订单被退→不执行）/ 超时（时钟注入+生产对账任务体）/ 撤回；会话随机后缀防残留 | M3.9⑤ | **是**（<¥0.05，≈8–12 次调用） | PG/Redis + 迁移 + 种子 + **uvicorn 在跑** + `.env` key |
