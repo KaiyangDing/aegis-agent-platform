@@ -4,7 +4,8 @@
 
 - **定义源在 repo**（`evals/cases.json`，JSON 数组、版本化、PR 可审）；**运行事实源在表**
   （`eval_cases`，`scripts/seed_eval_cases.py` 幂等 upsert——重跑无副作用、字段修订生效、
-  **enabled 运营开关不被重跑冲掉**）；评测执行只读表。原 `cases/seed.jsonl` 已删（单一定义源）；
+  **enabled 运营开关不被重跑冲掉**）；评测执行只读表。`cases/seed.jsonl` 为 M3.11 历史
+  原件**封存保留**（用户 M4.4① 验收裁决）——不再维护不再被任何代码读取，改用例只改 cases.json；
 - 消费方四处：**M3.12** `fallback_rate_m3.py`（`expectation.kind=out_of_kb` 全量=兜底触发率分母）/
   校准复核（retrieval 行的 chunk_source 判据）/ **M4.3** CI 回放行为断言
   （must_not_contain 确定性字面）/ **M4.4** `run_eval.py`（机器断言先行 + LLM-as-judge 语义判）；
