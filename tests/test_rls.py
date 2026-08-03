@@ -401,3 +401,112 @@ async def test_mock_write_op_own_tenant_allowed(mock_rls_engine) -> None:
                     await conn.execute(text("SELECT count(*) FROM mock_write_ops WHERE idempotency_key = 'wo-rls-ok'"))
                 ).scalar_one()
     assert n == 1
+
+
+# ---------------------------------------------------------------------------
+# M4.0② 增量节：候选④——stream 端点的 "admin 平台级" 在 RLS 在场时不成立
+# ---------------------------------------------------------------------------
+# 缺陷本体（M4.0① 探针实测）：`_ensure_owned` 走常规 app 工厂读 RLS 名单内的
+# `sessions`，而 auth 对**所有角色**无差别 `current_tenant_id.set()`（auth.py:144，
+# admin 无豁免）→ admin 拉他租会话恒 404「会话不存在」。代码"只对 USER 校验归属"
+# 的写法说明**意图是放行**，是 RLS 悄悄拦下（#46 家族第二例：加一层防线会让上层
+# 判断变成死代码）。性质 fail-closed 不泄漏，但能力声明与 02 §7.1 矩阵不符，且
+# **同一提交 `d1d2275` 的兄弟端点 `events_view.py:38-40` 就显式走了 owner 查读缝**
+# ——两个端点对同一问题给了两个答案（admin 会收到"events 看得见、stream 说不存在"）。
+# 既有测试全绿因 #47：测试连 owner，RLS 不在场。
+#
+# 修法：两处 `SessionRecord` 读（归属校验 + 关流判据）改走 owner 查读缝
+# （`app.state.approvals_lookup`，M3.9② 拍板Ⅲ 已备好的平台视角）。事件读**不用改**
+# ——`events` 无 tenant_id 列、不在 RLS 名单内（P5：仅带 tenant_id 列的表）。
+
+
+# 测法说明：修复点是**调用点传哪个 factory**（而非 `_ensure_owned` 本身），故必须走
+# 端点级——app 侧 session_factory 连 RLS 低权引擎、approvals_lookup 连 owner 引擎，
+# 这正是生产装配形态（main.py:99 `approvals_lookup or get_owner_session_factory()`）。
+# 顺带这是 #47「测试跑在无 RLS 世界」的一块补丁：本条真的把业务端点放进了 RLS 在场的世界。
+
+
+class _NullGateway:
+    def complete(self, req):  # pragma: no cover —— GET 通道不触 LLM
+        raise AssertionError("GET 通道绝不调用 LLM")
+
+
+class _Limiter:
+    async def try_take(self, scope, rate, capacity, cost=1.0):
+        return (True, 0.0)
+
+
+async def test_admin_cross_tenant_stream_is_platform_level(rls_engine, owner_engine) -> None:
+    """admin 拉他租会话的流：02 §7.1 矩阵声明的"平台级"必须真的成立（≠404）。
+
+    修复前红：`_ensure_owned` 走 app 工厂 → RLS 过滤 → `scalar_one_or_none()` 得 None
+    → 404「会话不存在」。修复后绿：归属校验与关流判据两处 SessionRecord 读改走
+    owner 查读缝；事件读**不改**（events 无 tenant_id、不在 RLS 名单内）。
+    """
+    import httpx
+    from pydantic import SecretStr
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from aegis.api.auth import issue_token
+    from aegis.api.main import create_app
+    from aegis.api.notify import EventNotifier
+    from aegis.core.config import Settings
+    from aegis.core.tenancy import Role
+    from aegis.runtime.runtime import AgentRuntime
+
+    secret = "m4-rls-probe-secret-key-32bytes-min!!"
+    app_factory = async_sessionmaker(rls_engine, expire_on_commit=False)
+    owner_factory = async_sessionmaker(owner_engine, expire_on_commit=False)
+    gw = _NullGateway()
+    app = create_app(
+        Settings(jwt_secret=SecretStr(secret)),
+        session_factory=app_factory,
+        runtime=AgentRuntime(gw, app_factory),
+        limiter=_Limiter(),
+        gateway=gw,
+        approvals_lookup=owner_factory,  # 生产同形：平台视角查读缝
+        notifier=EventNotifier("postgresql+asyncpg://unused/unused", poll_interval_s=0.05),
+        msg_redis=None,
+    )
+    token = issue_token(user_id="admin-rls", tenant_id="rls-t-a", role=Role.ADMIN, ttl_s=3600, secret=secret)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        # s-rls-b 属租户 rls-t-b（rls_ready 种子）、idle 且无事件 → 回放空、立即关流
+        resp = await c.get("/v1/sessions/s-rls-b/stream", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, f"admin 平台级不成立：{resp.status_code} {resp.text}"
+
+
+async def test_user_cross_tenant_stream_still_404(rls_engine, owner_engine) -> None:
+    """反向对照（防修过头）：普通用户拉他租会话仍须 404，且理由是**归属判定**而非 RLS。
+
+    改用 owner 查读缝后，`row` 不再被 RLS 抹掉——挡住越权的必须是 `_ensure_owned`
+    里那条 USER 分支（#19 不泄露存在性）。若修复顺手把该分支也绕过，本条立刻变红。
+    """
+    import httpx
+    from pydantic import SecretStr
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from aegis.api.auth import issue_token
+    from aegis.api.main import create_app
+    from aegis.api.notify import EventNotifier
+    from aegis.core.config import Settings
+    from aegis.core.tenancy import Role
+    from aegis.runtime.runtime import AgentRuntime
+
+    secret = "m4-rls-probe-secret-key-32bytes-min!!"
+    app_factory = async_sessionmaker(rls_engine, expire_on_commit=False)
+    owner_factory = async_sessionmaker(owner_engine, expire_on_commit=False)
+    gw = _NullGateway()
+    app = create_app(
+        Settings(jwt_secret=SecretStr(secret)),
+        session_factory=app_factory,
+        runtime=AgentRuntime(gw, app_factory),
+        limiter=_Limiter(),
+        gateway=gw,
+        approvals_lookup=owner_factory,
+        notifier=EventNotifier("postgresql+asyncpg://unused/unused", poll_interval_s=0.05),
+        msg_redis=None,
+    )
+    token = issue_token(user_id="u-rls-a", tenant_id="rls-t-a", role=Role.USER, ttl_s=3600, secret=secret)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/v1/sessions/s-rls-b/stream", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 404

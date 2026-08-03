@@ -36,6 +36,7 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
 async def _ensure_owned(factory: SessionFactory, session_id: str, principal: Principal) -> None:
+    """归属校验。factory 必须是 **owner 查读缝**（platform 视角）——见调用点注释。"""
     async with factory() as s:
         row = (await s.execute(select(SessionRecord).where(SessionRecord.id == session_id))).scalar_one_or_none()
     if row is None:
@@ -103,9 +104,15 @@ async def stream_session(
     after_seq: int = 0,
 ) -> StreamingResponse:
     factory: SessionFactory = request.app.state.session_factory
+    # M4.0②（候选④）：sessions 在 RLS 名单内，而 auth 对**所有**角色无差别设租户
+    # 上下文（auth.py:144，admin 无豁免）——用 app 工厂读会让 admin 拉他租会话恒 404，
+    # 把"只对 USER 校验归属"这句放行意图悄悄推翻（#46 家族：新增防线改变上层可达路径）。
+    # 兄弟端点 events_view.py:38-40 同提交里就走了 owner 缝，两端点本该给同一个答案。
+    # 事件读**不用改**：events 无 tenant_id 列、不在 RLS 名单内（P5）。
+    lookup: SessionFactory = request.app.state.approvals_lookup
     notifier: EventNotifier = request.app.state.notifier
     redis: aioredis.Redis | None = request.app.state.msg_redis
-    await _ensure_owned(factory, session_id, principal)
+    await _ensure_owned(lookup, session_id, principal)
     last_event_id = request.headers.get("last-event-id", "").strip()
     if last_event_id.isdigit():
         after_seq = max(after_seq, int(last_event_id))  # 双源取 max（EventSource 重连自动带头）
@@ -147,7 +154,7 @@ async def stream_session(
                         yield encode_frame(ChatFrame("message_reset", {"text": buffered}))
             if state["terminated"]:
                 return  # 主 Agent 会话：终止帧已发，关流
-            async with factory() as s:
+            async with lookup() as s:
                 run_state = (
                     await s.execute(select(SessionRecord.run_state).where(SessionRecord.id == session_id))
                 ).scalar_one_or_none()
