@@ -523,6 +523,17 @@ class AgentRuntime:
                 # 单在事件不在：create 与事件 append 之间的缝到不了 approved（T2 未翻无人可批）
                 # ——真到这里=事实源被外力动过；留痕走常规分诊，不越权代管
                 logger.warning("审批单 %s 缺 approval_requested 事件，跳过认领：session=%s", claim.id, session_id)
+            elif any(r.type == EventType.LOOP_TERMINATED.value for r in rows[claim_req_index + 1 :]):
+                # M4.0②（候选③）：该单所属的 run 已经收尾——它不是"崩在批准与兑现之间"。
+                # `approved ∧ event_id IS NULL` 有**第二种**成因：precheck 否决时无执行事件
+                # 可挂，单据合法地停在这个状态（14i 拍板Ⅳ 登记的已知边界）。用它单独代理
+                # "批准未兑现"，就会让一张几轮前就了结的陈旧单被此后**任意一次**崩溃恢复
+                # 捞走：本该走 c 支（半截 llm_call 作废重发）的新 run 被劫持成"兑现旧批准"，
+                # precheck 此刻若放行还会执行一次本轮从未请求的写操作（M4.0① 探针实测）。
+                # 判据只读既有事实：单据的 approval_requested 之后若已有 loop_terminated，
+                # 那个 run 已了结——无新字段、无新查询（rows 本就是全量事件按 seq 排序）。
+                logger.info("审批单 %s 所属 run 已收尾，跳过认领：session=%s", claim.id, session_id)
+                claim_req_index = None
         if claim is not None and claim_req_index is not None:
             claim_args: Mapping[str, Any] = claim.args
             call_row = next(
