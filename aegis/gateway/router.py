@@ -173,6 +173,7 @@ class LLMGateway:
         fault_rate: float = 0.0,
         fault_targets: frozenset[str] = frozenset(),
         fault_mode: FaultMode = "error",
+        cache_probe_interval: float = 5.0,  # M4.0④（#29）：缓存降级期顺路探针间隔
     ):
         self._providers = providers
         self._routes = routes
@@ -188,6 +189,33 @@ class LLMGateway:
         self._fault_rate = fault_rate
         self._fault_targets = fault_targets
         self._fault_mode = fault_mode
+        # M4.0④（#29）：缓存降级粘滞状态。放这里而非 ExactCache——cache.py 全文零异常
+        # 处理，降级语义一直住在调用侧（下方 get/put 两处 try）；塞进 cache 会让
+        # "缓存故障怎么办"分裂两处，留在这里则一处说了算
+        self._cache_probe_interval = cache_probe_interval
+        self._cache_degraded = False
+        self._cache_next_probe = 0.0
+
+    def _cache_available(self) -> bool:
+        """本次是否访问缓存：未降级=是；降级期每 probe_interval 秒放一个顺路探针。
+
+        get 与 put 共用同一个窗口（不各自领）——同一请求内 get 探针成功即切回，
+        紧随其后的 put 自然走正常路径，无需第二个窗口。
+        """
+        if not self._cache_degraded:
+            return True
+        now = time.monotonic()
+        if now < self._cache_next_probe:
+            return False
+        self._cache_next_probe = now + self._cache_probe_interval
+        return True
+
+    def _cache_degrade(self, what: str) -> None:
+        """缓存触点失败：粘滞降级 + 顺延窗口（首次降级与探针失败共用此路径）。"""
+        self._cache_next_probe = time.monotonic() + self._cache_probe_interval
+        if not self._cache_degraded:
+            logger.warning("精确缓存不可用，降级为直通（%s）", what, exc_info=True)
+            self._cache_degraded = True
 
     async def _resolve_monthly_budget(self, tenant_id: str) -> int | None:
         """预算三态：resolver 值（切表，#13）/ 静态配置（resolver=None）/ None=读挂 fail-open 跳闸门。"""
@@ -213,13 +241,18 @@ class LLMGateway:
             deadline = time.monotonic() + req.deadline_s
 
         # 最外圈：缓存命中 = 零上游成本，不该消耗任何配额、不该问任何闸门。
-        # 缓存的任何故障（连接失败/脏数据）都退化为 miss——缓存永远不许拖死主链路
-        if self._cache is not None:
+        # 缓存的任何故障（连接失败/脏数据）都退化为 miss——缓存永远不许拖死主链路。
+        # M4.0④（#29）：降级期还要"不付延迟"，故 _cache_available 做粘滞闸
+        if self._cache is not None and self._cache_available():
             hit: list[LLMChunk] | None = None
             try:
                 hit = await self._cache.get(req)
             except Exception:
-                logger.warning("缓存读取失败，按 miss 处理", exc_info=True)
+                self._cache_degrade("读取")
+            else:
+                if self._cache_degraded:
+                    logger.warning("精确缓存恢复，切回缓存路径")
+                    self._cache_degraded = False
             if hit is not None:
                 hit_usage: UsageChunk | None = None
                 for chunk in hit:
@@ -313,11 +346,11 @@ class LLMGateway:
                             buffer.append(chunk)
                         yield chunk
                 await self._breaker.on_success(cand.provider)
-                if self._cache is not None:
+                if self._cache is not None and self._cache_available():
                     try:
                         await self._cache.put(req, buffer)
                     except Exception:
-                        logger.warning("缓存写入失败，跳过", exc_info=True)
+                        self._cache_degrade("写入")
                 if usage_seen is not None:
                     await self._safe_record(req, cand.provider, usage_seen)
                 return
