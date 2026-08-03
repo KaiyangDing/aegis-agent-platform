@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     mock_latency_ms: int = Field(default=0, ge=0)  # mock 端点人为延迟；演示"写超时→X1 结果不明"剧本用
     mock_error_rate: float = Field(default=0.0, ge=0.0, le=1.0)  # mock 概率 503（0=关闭）
 
+    # ---- 离线评测（M4.4；runner 专用脚本，judge 永不进在线链路——ADR-002 决策 4）----
+    eval_run_token_budget: int = Field(default=150_000, gt=0)  # 单批次 token 硬上限（被评+judge 合计，超限中止批次）
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。

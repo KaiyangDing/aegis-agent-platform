@@ -756,3 +756,31 @@ async def test_mock_claim_replay_cross_tenant_is_loud_under_rls(mock_rls_seeded,
             again = await c.post("/refunds", json=body, headers={"Idempotency-Key": "wo-rls-claim-a"})
             assert again.status_code == 200
             assert again.json()["duplicate"] is True  # 同租回放：RLS 在场时健康如常
+
+
+# ---------------------------------------------------------------------------
+# M4.4 增量节：评测双表的 RLS 前置义务证人
+# ---------------------------------------------------------------------------
+# M3.3 前置义务：新表迁移必须自带 ENABLE RLS + 策略（DEFAULT PRIVILEGES 只授 DML
+# 不给 RLS）。eval_cases 带 tenant_id 列 → 按 P5 口径入 RLS 名单（第十表）；
+# eval_runs 无 tenant_id 列 → 不上（events 先例）。本条与 rag/mock 的
+# "policies in place" 同款——迁移漏写策略时在这里红，而不是等某天 app 引擎
+# 静默读空集。
+
+
+async def test_eval_cases_rls_policy_in_place(owner_engine) -> None:
+    async with owner_engine.connect() as conn:
+        ok = (await conn.execute(text("SELECT to_regclass('eval_cases') IS NOT NULL"))).scalar_one()
+        if not ok:
+            if os.environ.get("CI"):
+                raise RuntimeError("CI 里 eval_cases 必须在位——检查 M4.4 迁移是否入链")
+            pytest.skip("eval_cases 未建：先 uv run alembic upgrade head")
+        n = (
+            await conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_policies "
+                    "WHERE tablename = 'eval_cases' AND policyname = 'tenant_isolation'"
+                )
+            )
+        ).scalar_one()
+    assert n == 1

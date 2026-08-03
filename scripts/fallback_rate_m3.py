@@ -1,6 +1,6 @@
 """M3.12② 兜底触发率实测（真实调用；00 §7.2 第 4 条：知识库外 ≥95%，未触发逐条归因）。
 
-分母 = evals/cases/seed.jsonl 的 kind=out_of_kb 全量（I1：不抄第二份清单）；
+分母 = evals/cases.json 里 expectation.kind=out_of_kb 全量（I1：不抄第二份清单）；
 路径 = 主 Agent 生产装配直驱（build_agent_spec + 真实检索接线——okb 问题检索空/低分
 → prompt 规则 3 兜底）。**口径限定语**：本口径测 intent 分诊之后的主 Agent 语义，
 HANDOFF 直通路径（用户点名转人工）不在分母。
@@ -31,7 +31,7 @@ from aegis.gateway.factory import build_embedding_client, build_gateway
 from aegis.runtime.runtime import AgentRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES_PATH = ROOT / "evals" / "cases" / "seed.jsonl"
+CASES_PATH = ROOT / "evals" / "cases.json"  # M4.4①：seed.jsonl 迁 cases.json（细分类挪 expectation.kind）
 
 MAX_CALLS_BUDGET = 15
 MAX_COST_YUAN = Decimal("0.20")
@@ -53,8 +53,8 @@ def _load_record_script() -> ModuleType:
 
 
 def _okb_cases() -> list[dict]:
-    rows = [json.loads(line) for line in CASES_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return [r for r in rows if r["kind"] == "out_of_kb"]
+    rows = json.loads(CASES_PATH.read_text(encoding="utf-8"))
+    return [r for r in rows if r["expectation"]["kind"] == "out_of_kb"]
 
 
 async def _spend(session_ids: list[str]) -> tuple[int, Decimal, int]:
@@ -79,7 +79,7 @@ async def main() -> None:
     seed = record.load_seed()
     cases = _okb_cases()
     if not cases:
-        raise SystemExit("seed.jsonl 无 out_of_kb 用例——分母缺失，先查评测集")
+        raise SystemExit("cases.json 无 out_of_kb 用例——分母缺失，先查评测集")
     sf = get_session_factory()
     runtime = AgentRuntime(build_gateway(), sf, retrieval=RetrievalProvider(Retriever(sf, build_embedding_client())))
 
@@ -93,7 +93,7 @@ async def main() -> None:
         spec = build_agent_spec(record.tenant_from_seed(seed, tenant))
         with tenant_context(tenant):
             await record._ensure_session(sf, sid, tenant, user)
-            trace = await record._drive(runtime.run(spec, sid, case["query"]))
+            trace = await record._drive(runtime.run(spec, sid, case["question"]))
         answer = trace.final_answer
         by_signal = any(sig in answer for sig in record._FALLBACK_SIGNALS)
         by_ticket = "ticket_create" in trace.tool_calls

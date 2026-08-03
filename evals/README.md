@@ -1,27 +1,27 @@
-# evals · 种子评测集（M3.11 交付②；M4.4 判据文档的前身）
+# evals · 评测用例定义源（M3.11 建；M4.4① 迁 `cases.json`，落表启用）
 
-## 1. 地位与形态
+## 1. 地位与形态（M4.4 §3-1 拍板）
 
-- **文件形态维护**（`cases/seed.jsonl`，一行一例）：落表归 M4.4（eval_cases/eval_runs 迁移），
-  届时字段即列——M3 期间建表即越步扩权（plans/m3-detailed §7 陷阱 11）；
-- 消费方四处：**M3.12** `fallback_rate_m3.py`（out_of_kb 5 条=兜底触发率 ≥95% 的分母）与四大对抗对账 /
-  **M3.11③** 校准复核（retrieval 行的 chunk_source 判据）/ **M4.3** CI 回放行为断言
-  （must_not_contain 确定性字面）/ **M4.4** LLM-as-judge（behavior 语义判）；
+- **定义源在 repo**（`evals/cases.json`，JSON 数组、版本化、PR 可审）；**运行事实源在表**
+  （`eval_cases`，`scripts/seed_eval_cases.py` 幂等 upsert——重跑无副作用、字段修订生效、
+  **enabled 运营开关不被重跑冲掉**）；评测执行只读表。原 `cases/seed.jsonl` 已删（单一定义源）；
+- 消费方四处：**M3.12** `fallback_rate_m3.py`（`expectation.kind=out_of_kb` 全量=兜底触发率分母）/
+  校准复核（retrieval 行的 chunk_source 判据）/ **M4.3** CI 回放行为断言
+  （must_not_contain 确定性字面）/ **M4.4** `run_eval.py`（机器断言先行 + LLM-as-judge 语义判）；
 - 扩充归 M4.5（30–50 条）；**id 稳定不重排**（interview-questions 同款纪律），新用例追加编号。
 
-## 2. 字段表（JSONL 行）
+## 2. 字段表（cases.json 数组元素；顶层字段即 eval_cases 表列）
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `id` | ✓ | 稳定唯一；前缀=类别（`iso-`/`okb-`/`ret-`/`nor-`） |
-| `kind` | ✓ | `isolation` / `out_of_kb` / `retrieval` / `normal` |
-| `facet` | isolation 限定 | 隔离三面：`knowledge`（知识/检索）/ `order`（数据/订单归属）/ `approval`（动作/审批与读端点） |
+| `id` | ✓ | 稳定唯一；前缀=细分类（`iso-`/`okb-`/`ret-`/`nor-`） |
 | `tenant_id` / `user_id` | ✓ | 执行身份，必须指向 `scripts/seed_demo.py` 的种子事实（测试钉住引用一致性） |
-| `query` | ✓ | 用户输入原文；approval 面是 API 动作描述（带「（API 面）」前缀，不走聊天链路） |
-| `expect` | ✓ | 判据对象，键见 §3 |
-| `note` | ✓ | 用例意图与判据出处——判据是设计不是装饰，每条写清为什么 |
+| `category` | ✓ | 表列三类：`retrieval` / `e2e` / `adversarial`——与细分类固定映射（isolation→adversarial；out_of_kb、normal→e2e），lint 钉一致性 |
+| `question` | ✓ | 用户输入原文；approval 面是 API 动作描述（带「（API 面）」前缀，不走聊天链路） |
+| `expectation` | ✓ | 判据对象（JSONB 落表），键见 §3；**并承载三个源字段**：`kind`（细分类四种，fallback_rate 分母与配比 lint 靠它）/ `facet`（isolation 限定，三面覆盖对账）/ `note`（用例意图——判据是设计不是装饰） |
+| `source` | ✓ | `seed`（M3.11 迁入）/ `m4.5`（扩充批） |
 
-## 3. expect 判据词表
+## 3. expectation 判据词表
 
 | 键 | 值域/类型 | 语义 |
 |---|---|---|
@@ -55,6 +55,7 @@
 ## 5. 维护纪律
 
 - 语料锚变更必须双向同步：语料改动跑 `tests/apps/test_seed_script.py`（语义锚 lint）、
-  用例改动跑 `tests/evals/test_seed_cases.py`（引用一致性 lint）——两侧红了先修判据一致性再提交；
+  用例改动跑 `tests/evals/test_seed_cases.py`（引用一致性七层 lint）——两侧红了先修判据一致性再提交；
+- 用例改动后须重跑 `uv run python scripts/seed_eval_cases.py` 让表与定义源同步（定义源改了表不自动变）；
 - 订单号/用户名引用以 `scripts/seed_demo.py` 常量为唯一事实源（I1），测试自动核对；
 - 敏感纪律与 cassette 同款：用例只许虚构演示数据，禁真实 PII/key。
