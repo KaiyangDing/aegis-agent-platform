@@ -1,0 +1,33 @@
+# gitleaks 配置（M4.0③，00 §10.1 #24 / 评审 C32）
+#
+# 地位：阻断式密钥扫描的豁免面。默认规则集全量启用（extend.useDefault），
+# 本文件只登记**经人工核实无害**的匹配项——每条豁免必须写清"为什么它不是真密钥"，
+# 空 allowlist 也保留文件本体：让"加豁免"这个动作必须显式发生在版本历史里。
+#
+# 红线（07 §3 第 2/6 条）：真实 key 一旦进历史，git rm 救不回来、只能作废换 key。
+# 故本扫描是阻断式（无 continue-on-error），且 checkout 必须 fetch-depth: 0 扫全历史
+# ——只扫最新提交等于把"密钥曾经进过历史"这件事漏掉。
+#
+# 验证红绿的正确姿势：临时分支塞一个**假**串（如 sk-fake0000...）→ push → CI 红 → 删分支。
+# 绝不用真 DASHSCOPE_API_KEY 验证。
+
+title = "Aegis gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "经核实的无害匹配（每条须写明理由；新增豁免必须在 PR 里被看见）"
+
+# 演示/测试用的固定弱口令：compose 与测试连接串里的 aegis:aegis / aegis_app:aegis_app。
+# 它们是本地开发容器的凭据，端口只绑 127.0.0.1（07 §3 第 7 条），生产走 secrets（02 §5）。
+regexes = [
+  '''postgresql\+asyncpg://aegis(_app)?:aegis(_app)?@''',
+]
+
+# cassette 与 reports 是录制产物：内含模型返回的文本与 usage，不含凭据；
+# 但其中的长十六进制串（事件 id / sha256 摘要）易被通用高熵规则误伤。
+paths = [
+  '''tests/cassettes/.*\.json''',
+  '''reports/.*''',
+]

@@ -39,6 +39,18 @@ jobs:
       # action 钉到完整 commit SHA：tag 可被上游重指恶意提交，SHA 不可变（审计加固 B）
       - name: 检出代码
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # M4.0③（#24）：gitleaks 必须扫全历史——只扫最新提交等于漏掉"密钥曾经进过历史"，
+          # 而那正是唯一救不回来的情形（进过历史只能作废换 key，07 §3 第 2/6 条）
+          fetch-depth: 0
+
+      # 阻断式密钥扫描（评审 C32 / 00 §10.1 #24）：置于 checkout 之后第一道——
+      # 后面每一步都可能把仓库内容打进日志，扫描要跑在它们之前。
+      # 豁免面在仓库根 .gitleaks.toml，每条豁免须写明理由。
+      - name: 密钥扫描（gitleaks，全历史）
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 安装 uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -47,6 +59,11 @@ jobs:
 
       - name: 安装依赖（严格按 uv.lock，锁不同步直接失败）
         run: uv sync --frozen
+
+      # 依赖漏洞扫描（评审 C32 / #24）：审计的是**当前 venv**，故必须 uv run；
+      # 锁文件即事实源。发现漏洞默认阻断；确需豁免用 --ignore-vuln <ID> 并在此注释写理由。
+      - name: 依赖漏洞扫描（pip-audit）
+        run: uv run pip-audit
 
       - name: 格式检查（ruff format）
         run: uv run ruff format --check .
@@ -62,6 +79,15 @@ jobs:
 
       - name: 数据库迁移（alembic 在 CI 真实执行）
         run: uv run alembic upgrade head
+
+      # M4.0③（#4）：挡"ORM 改了没生成迁移"的漂移。这个洞真实存在——CI 先 alembic
+      # 后 conftest 的 create_all，两条建表路径不一致时**都不报错**（create_all 对已存在
+      # 的表是 no-op，于是新加的列在 CI 里静默缺失/多余）。须在 upgrade head 之后跑：
+      # check 要比对"迁移链建出的库"与"当前 ORM 元数据"。
+      # downgrade 往返（base → head）**不进 CI**：它会清空业务表（含演示种子）且拖长时长，
+      # 只做一次性本地验证、结果落 reports/m4_alembic_roundtrip.txt。
+      - name: 迁移漂移检查（alembic check）
+        run: uv run alembic check
 
       - name: 测试（pytest）
         run: uv run pytest
