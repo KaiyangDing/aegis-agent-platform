@@ -1,0 +1,86 @@
+M4.2 /metrics 实拍凭证（2026-08-03 16:37:54Z）
+==================================================
+口径：GET /metrics 经 create_app() 生产装配链实拍（ASGI 直连，与 curl 同字节）；
+#23 演示=拍板 2 批准的一次性真实调用例外，恰 3 轮 chat（会话 m42-metrics-demo-e94abb67），
+预算比分子复用月度闸门 MeteringRecorder.month_spend 同一实现。
+
+aegis_tenant_budget_used_ratio{tenant_id="tenant-a"}：
+  演示前 = 0.0008025
+  演示后 = 0.003145   （↑ 肉眼可见上升，00 §8.1 M4.2 行 #23 验收点）
+
+-------- 演示后全量 exposition（11 族） --------
+# HELP aegis_http_requests_total HTTP 请求计数（api 中间件；path 为路由模板防 label 基数爆炸）
+# TYPE aegis_http_requests_total counter
+aegis_http_requests_total{method="GET",path="/metrics",status="200"} 1.0
+aegis_http_requests_total{method="POST",path="/v1/chat",status="200"} 3.0
+# HELP aegis_http_requests_created HTTP 请求计数（api 中间件；path 为路由模板防 label 基数爆炸）
+# TYPE aegis_http_requests_created gauge
+aegis_http_requests_created{method="GET",path="/metrics",status="200"} 1.785775056386501e+09
+aegis_http_requests_created{method="POST",path="/v1/chat",status="200"} 1.7857750612010155e+09
+# HELP aegis_chat_first_token_seconds chat 首 token 延迟：t0=进入 handler，观测点=首个 token 帧（M3.12/M5.2 同口径）
+# TYPE aegis_chat_first_token_seconds histogram
+aegis_chat_first_token_seconds_bucket{le="0.1",tenant_id="tenant-a"} 0.0
+aegis_chat_first_token_seconds_bucket{le="0.25",tenant_id="tenant-a"} 0.0
+aegis_chat_first_token_seconds_bucket{le="0.5",tenant_id="tenant-a"} 0.0
+aegis_chat_first_token_seconds_bucket{le="1.0",tenant_id="tenant-a"} 0.0
+aegis_chat_first_token_seconds_bucket{le="1.5",tenant_id="tenant-a"} 0.0
+aegis_chat_first_token_seconds_bucket{le="2.0",tenant_id="tenant-a"} 0.0
+aegis_chat_first_token_seconds_bucket{le="2.5",tenant_id="tenant-a"} 0.0
+aegis_chat_first_token_seconds_bucket{le="5.0",tenant_id="tenant-a"} 3.0
+aegis_chat_first_token_seconds_bucket{le="10.0",tenant_id="tenant-a"} 3.0
+aegis_chat_first_token_seconds_bucket{le="30.0",tenant_id="tenant-a"} 3.0
+aegis_chat_first_token_seconds_bucket{le="+Inf",tenant_id="tenant-a"} 3.0
+aegis_chat_first_token_seconds_count{tenant_id="tenant-a"} 3.0
+aegis_chat_first_token_seconds_sum{tenant_id="tenant-a"} 12.981678400014061
+# HELP aegis_chat_first_token_seconds_created chat 首 token 延迟：t0=进入 handler，观测点=首个 token 帧（M3.12/M5.2 同口径）
+# TYPE aegis_chat_first_token_seconds_created gauge
+aegis_chat_first_token_seconds_created{tenant_id="tenant-a"} 1.7857750610838094e+09
+# HELP aegis_chat_request_seconds chat 全程延迟（首帧到流尽）
+# TYPE aegis_chat_request_seconds histogram
+aegis_chat_request_seconds_bucket{le="0.5",tenant_id="tenant-a"} 0.0
+aegis_chat_request_seconds_bucket{le="1.0",tenant_id="tenant-a"} 0.0
+aegis_chat_request_seconds_bucket{le="2.5",tenant_id="tenant-a"} 0.0
+aegis_chat_request_seconds_bucket{le="5.0",tenant_id="tenant-a"} 1.0
+aegis_chat_request_seconds_bucket{le="10.0",tenant_id="tenant-a"} 3.0
+aegis_chat_request_seconds_bucket{le="20.0",tenant_id="tenant-a"} 3.0
+aegis_chat_request_seconds_bucket{le="30.0",tenant_id="tenant-a"} 3.0
+aegis_chat_request_seconds_bucket{le="60.0",tenant_id="tenant-a"} 3.0
+aegis_chat_request_seconds_bucket{le="+Inf",tenant_id="tenant-a"} 3.0
+aegis_chat_request_seconds_count{tenant_id="tenant-a"} 3.0
+aegis_chat_request_seconds_sum{tenant_id="tenant-a"} 17.75105760000588
+# HELP aegis_chat_request_seconds_created chat 全程延迟（首帧到流尽）
+# TYPE aegis_chat_request_seconds_created gauge
+aegis_chat_request_seconds_created{tenant_id="tenant-a"} 1.7857750612008688e+09
+# HELP aegis_runs_terminated run 终止计数，按终止原因分维（cumulative, safe for rate()；成功率=completed/合计）
+# TYPE aegis_runs_terminated gauge
+aegis_runs_terminated{reason="completed",tenant_id="tenant-a"} 3.0
+# HELP aegis_llm_tokens 账本 token 累计（cumulative；kind=prompt|completion）
+# TYPE aegis_llm_tokens gauge
+aegis_llm_tokens{kind="prompt",tenant_id="tenant-a",tier="embedding"} 1621.0
+aegis_llm_tokens{kind="completion",tenant_id="tenant-a",tier="embedding"} 0.0
+aegis_llm_tokens{kind="prompt",tenant_id="tenant-b",tier="embedding"} 1350.0
+aegis_llm_tokens{kind="completion",tenant_id="tenant-b",tier="embedding"} 0.0
+aegis_llm_tokens{kind="prompt",tenant_id="tenant-a",tier="standard"} 3665.0
+aegis_llm_tokens{kind="completion",tenant_id="tenant-a",tier="standard"} 336.0
+aegis_llm_tokens{kind="prompt",tenant_id="tenant-a",tier="fast"} 617.0
+aegis_llm_tokens{kind="completion",tenant_id="tenant-a",tier="fast"} 51.0
+# HELP aegis_llm_cost_yuan 账本成本累计（元，cumulative；精确金额以 usage_ledger Decimal 为准，此处为观测近似）
+# TYPE aegis_llm_cost_yuan gauge
+aegis_llm_cost_yuan{tenant_id="tenant-a"} 0.004586
+aegis_llm_cost_yuan{tenant_id="tenant-b"} 0.000676
+# HELP aegis_tool_invocations 工具调用计数，按终局分维（cumulative；工具成功率=succeeded/合计）
+# TYPE aegis_tool_invocations gauge
+aegis_tool_invocations{status="succeeded",tool_name="order_query"} 1.0
+# HELP aegis_handoffs 转人工计数（cumulative；转人工率分母用 aegis_runs_terminated 合计）
+# TYPE aegis_handoffs gauge
+# HELP aegis_cache_requests LLM 调用按缓存结果分维（cumulative；命中率=hit/(hit+miss)）
+# TYPE aegis_cache_requests gauge
+aegis_cache_requests{result="miss"} 28.0
+# HELP aegis_tenant_budget_used_ratio 本月 token 用量/月度预算（#23 逼近告警最小形态；budget≤0 的租户不导出）
+# TYPE aegis_tenant_budget_used_ratio gauge
+aegis_tenant_budget_used_ratio{tenant_id="tenant-a"} 0.003145
+aegis_tenant_budget_used_ratio{tenant_id="tenant-b"} 0.000675
+# HELP aegis_documents 知识库文档按摄取状态计数（FAILED/PROCESSING 的运维可见面）
+# TYPE aegis_documents gauge
+aegis_documents{status="done",tenant_id="tenant-b"} 10.0
+aegis_documents{status="done",tenant_id="tenant-a"} 10.0

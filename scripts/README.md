@@ -34,6 +34,7 @@
 | `demo_chat_acceptance.py` | 完整客服链路三幕（生产装配原件 create_app）：租户 A 查单退款直执 / **FAQ 守卫实证**（首问直答·跟进问进主 Agent）/ 租户工具面白名单 | M3.8③ | **是**（<¥0.02，≈5 次调用） | PG/Redis + 迁移 + **M3.8③ 版种子** + `.env` key |
 | `demo_hitl.ps1` | **HITL 业务闭环六段**（M3.9 验收面，走 HTTP API+curl.exe）：挂起提示 / 对抗④ 403 / 批准→#8 重跑→执行→续跑（重复决策 409）/ **TOCTOU 否决实证**（批准落锤前订单被退→不执行）/ 超时（时钟注入+生产对账任务体）/ 撤回；会话随机后缀防残留 | M3.9⑤ | **是**（<¥0.05，≈8–12 次调用） | PG/Redis + 迁移 + 种子 + **uvicorn 在跑** + `.env` key |
 | `demo_hitl_helper.py` | demo_hitl.ps1 证据面帮手：seed（订单复位 paid）/ mark-refunded（TOCTOU 制造）/ expire（时钟注入）/ sweep（直调生产 expire_approvals 任务体）/ status（会话·审批·事件·订单四面取证，owner 视角） | M3.9⑤ | 否（sweep 的踢恢复走终止路径零 LLM） | PG/Redis + 迁移 + 种子 |
+| `demo_metrics_acceptance.py` | M4.2 /metrics 验收演示（#23 预算比肉眼上升 + 11 族全量 exposition 实拍，产物 `reports/m4_metrics_sample.txt`；ratio 不升即硬失败不落盘）；生产装配链 ASGI 直连与 curl 同字节 | M4.2 收口 | **是**（**恰 3 轮写死**，¥0.01–0.05——拍板 2 一次性例外口径，改轮数=改口径先过用户） | PG/Redis + 迁移 + 种子 + `.env` key |
 
 ## 实验与压测（数字凭证的产地）
 
