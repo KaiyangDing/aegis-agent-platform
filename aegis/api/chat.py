@@ -66,7 +66,17 @@ async def _ensure_session(factory: SessionFactory, session_id: str, principal: P
             return RunState.IDLE.value
         except IntegrityError:  # 并发首见撞 PK：别人已建行——回读校归属
             async with factory() as s:
-                row = (await s.execute(select(SessionRecord).where(SessionRecord.id == session_id))).scalar_one()
+                row = (
+                    await s.execute(select(SessionRecord).where(SessionRecord.id == session_id))
+                ).scalar_one_or_none()
+            if row is None:
+                # M4.0③（#46）：RLS 在场时回读**仍被过滤成空**——撞 PK 的行属于他租，
+                # 我们永远看不见它。原 `.scalar_one()` 在此抛 NoResultFound → 500，
+                # 而 500 vs 200 本身就是存在性 oracle，与本函数 docstring"不泄露存在性"
+                # 的声明冲突。根因是时序：本函数写于 M3.2、RLS 上于 M3.3，下面那条
+                # `row.tenant_id != principal.tenant_id` 归属判定被 RLS 抢答成了死代码
+                # （#46 家族：加一层防线会改变上层代码的可达路径）。
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在") from None
     if row.tenant_id != principal.tenant_id or row.user_id != principal.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
     return row.run_state

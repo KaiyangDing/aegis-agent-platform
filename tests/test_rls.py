@@ -510,3 +510,36 @@ async def test_user_cross_tenant_stream_still_404(rls_engine, owner_engine) -> N
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/v1/sessions/s-rls-b/stream", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 404
+
+
+async def test_cross_tenant_session_id_collision_returns_404_not_500(rls_engine, owner_engine) -> None:
+    """M4.0③（#46）：他租已占用的 session_id 必须 404，不得 500。
+
+    缺陷链（M3 复盘站 3 探针实测）：`_ensure_session` 的 SELECT 被 RLS 过滤成 None
+    → 误判"首见"走建行 → INSERT 撞 PK → `IntegrityError` → 回读**仍被 RLS 过滤成空**
+    → `.scalar_one()` 抛 `NoResultFound` → 500。根因是时序：`_ensure_session` 写于 M3.2、
+    RLS 上于 M3.3，`row.tenant_id != principal.tenant_id` 那条归属判定被 RLS 抢答成死代码。
+    危害非数据泄漏，但 500 vs 200 构成**存在性 oracle**，与 chat.py:58 docstring
+    "不泄露存在性" 的声明不符。修=回读改 `scalar_one_or_none()` + None 抛 404（两行）。
+
+    这也是 #47「测试跑在无 RLS 世界」的又一块补丁：既有 admission 测试连 owner，
+    走的是 `row.tenant_id != ...` 那条**在生产中根本到不了**的分支。
+    """
+    from fastapi import HTTPException
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from aegis.api.auth import Principal
+    from aegis.api.chat import _ensure_session
+    from aegis.core.tenancy import Role
+
+    app_factory = async_sessionmaker(rls_engine, expire_on_commit=False)
+    intruder = Principal(user_id="u-rls-a", tenant_id="rls-t-a", role=Role.USER)
+    with tenant_context("rls-t-a"):
+        with pytest.raises(HTTPException) as exc:
+            await _ensure_session(app_factory, "s-rls-b", intruder)  # 该 id 属 rls-t-b
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "会话不存在"
+    # 未误建行：他租的行仍归他租（owner 视角核证，不受 RLS 影响）
+    async with owner_engine.connect() as conn:
+        owner_tid = (await conn.execute(text("SELECT tenant_id FROM sessions WHERE id = 's-rls-b'"))).scalar_one()
+    assert owner_tid == "rls-t-b"
