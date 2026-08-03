@@ -70,3 +70,45 @@ M4.3 CI 回归的输入范围以本表为准。逐行核对承载物存在且可
 | l3_budget_token_exceeded | token_budget_exceeded（L3 租户配置注入口径；main 道**零条目**=闸门 #3 预检零调用） | 真实录制（零 LLM 条目） | `l3/budget_token_exceeded.json` + 冒烟端到端回放 |
 | l3_hitl_approve_resume | 挂起（无终止事件）→ decide → resume completed + 订单落 refunded | 真实录制 | `l3/hitl_approve_resume.json` + 冒烟载入（挂起/续跑双段条目形状） |
 | l3_tool_roundtrip | completed + 工具序列恰 [order_query]（L3 生产装配正例） | 真实录制 | `l3/tool_roundtrip_order_query.json` + 冒烟全链回放（FakeGateway×mock 后端） |
+
+## 7. 行为回归门与 PR 纪律（M4.3 起生效）
+
+11 盘文件形态资产由 `tests/replay/test_behavior_regression.py` 逐盘行为断言
+（终止原因必断；工具序列/禁词/必现事件按 manifest 键在场断言），期望登记在
+`tests/replay/expectations.json`（manifest）。**完整性三向钉死**：盘面文件 ≡
+manifest 条目 ≡ 驱动注册（DRIVERS），多录漏挂、条目悬空、驱动缺失都红。
+
+**新录一盘 cassette 的四件事**：
+1. 录制落盘（真实录制类走录制脚本，自检全过才落盘；手写类按 §1 格式）；
+2. 挂 manifest 期望——**先于录制从用例设计推导，不许跑一遍把实际输出抄成期望**
+   （抄输出是快照不是回归，坏行为会被固化）；
+3. 挂 DRIVERS 装配（三族样板就在该文件内：M2 演示工具族/长对话族/L3 族）；
+4. 若该盘不满足"四道全部耗尽"，进 EXHAUSTED_EXEMPT 必须带语义理由。
+
+**PR 纪律（重录触发时）**：
+1. 触发条件 = prompt 变更 **或** 调用结构变更（C10 并列口径，二者任一即触发）；
+2. 跑对应录制脚本（预算上限写死在脚本内）重新生成；
+3. `git diff --stat tests/cassettes` 确认变更盘与预期一致（§4 审查清单）；
+4. PR 描述附：diff 摘要 + 本次录制 token/费用；
+5. 评审人核对**期望行为是否需同步改 manifest**——条目数或行为轨迹变了，
+   manifest 期望必须在同一 PR 里改，且审查者必须能说出为什么。
+
+## 8. 断言边界声明（M4.3 定稿；"声明它比修它重要"）
+
+行为断言的扫描面 = **事件流语义域**（C31 归一化豁免 usage/latency/墙钟并别名化
+id，再剔机械噪声键 iteration/input_tokens_est/digest——哈希 hex 会撞数字禁词）。
+以下四条边界是裁决过的差集，不是疏漏：
+
+- **POST 帧面 / msgbuf / 工具轮前置文本不在扫描面**（观察 ㊾）：工具轮的前置
+  文本（"我帮您查一下"）只存在于 llm_result.text 不落 assistant_message 事件，
+  forbidden 断言扫不到它——若泄漏恰发生在该段，本门不报警；
+- **兜底轮话术互换**（观察 ㊼）：兜底路径上用户实际看到的 FALLBACK_LOOP_LIMIT
+  话术不在事件流里，事件流里那句从没到过用户——若未来录制兜底类 cassette，
+  manifest 期望必须按**事件面**的话术写，并知道它与用户所见不同；
+- **随机 id 不参与断言面**（观察 ㉜）：ticket_id=uuid4 之类随机值不进任何期望。
+  触发条件：录制含 handoff/兜底的盘、或引入"同盘两跑逐事件全等"的确定性断言
+  之前，**必须先给 mock 加确定性 id 注入缝**（别名化够不到 content 里的字符串）；
+- **重录门覆盖面 = 代码内 prompt 常量**（观察 ㉗）：租户侧 prompt
+  （`tenants.config["faq"]` 的 digest）不在"定了不动"纪律与本门覆盖面内——
+  digest 改了无任何机制知道，且 FAQ 直答路径当前**零 cassette 覆盖**，本门对
+  "FAQ 直答质量"既不绿也不红。该面的质量评测归 M4.4（与 ㉖ 直答守卫缺口同批裁决）。

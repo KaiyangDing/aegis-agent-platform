@@ -1,0 +1,51 @@
+# M4.3 回放回归门·红绿有效性验证凭证（2026-08-03）
+
+结论：门会响。改坏一个硬约束（会话预算闸门 #3），回放回归 15 例中恰 1 例响亮红
+（红在预算专属用例上，其余 14 例不陪跑）；还原后复绿 15/15。
+
+## 手法与等价性（两跳，各自可核）
+
+探针在影子副本执行（scratchpad 全仓拷贝，代码与本仓 HEAD `ac09505` 逐字节等价，
+拷贝后仅应用探针一行），本仓 git 全程零触碰（红线：坏代码绝不入库，00 §2.1 第 7 条）。
+- 影子红 = 本仓红：同代码同测试同数据库世界（探针前影子全量 945 passed 实测为证）；
+- 本地红 = CI 红：CI 第九道门跑全量 `uv run pytest`（ci.yml:66-67，无路径过滤），
+  tests/replay 收进即跑——该等价性解释已登记 00 §8.3 M4.3 行（拍板：本地手法）。
+
+## 改坏点（plans/m4 §3-4 候选②：预算约束）
+
+aegis/runtime/loop.py:289（闸门 #3 会话预算预检，阈值 ×10）：
+
+-            if self._tokens_used + input_est > self._policy.session_token_budget:
++            if self._tokens_used + input_est > self._policy.session_token_budget * 10:
+
+## 红形态（uv run pytest tests/replay -q，改坏后）
+
+FAILED tests/replay/test_behavior_regression.py::test_behavior_trace[l3/budget_token_exceeded.json]
+1 failed, 14 passed
+
+  aegis.runtime.replay.CassetteMismatch: main 道耗尽：已录 0 条，本次是该道第 1 次
+  调用——多出来的调用就是行为漂移（C10）；request_digest={'tier': 'standard', ...}
+
+红的机理：budget 盘录制时预算 100 < 首轮输入估算（预检零调用，main 道零条目）。
+闸门弱化 ×10 后管线不再预检终止、试图真调 LLM——空盘立刻 CassetteMismatch 响亮
+失配（C10"响亮失配而非静默错配"在门上的直接兑现）。终止原因断言根本没跑到：
+失配先炸，红得更早更响。
+
+## 为什么恰 1 红（信噪比证明）
+
+- adversarial_token_burn 不红：预算 2000×10=20000，该盘每轮巨型参数烧 token，
+  10 轮以内累计估算仍会超过 20000——预算仍先于轮数触发，行为轨迹不变故绿。
+  门只对真行为变化红，不对"参数改了但行为没变"误报。
+- 其余 13 例（隔离/工具链/长对话/HITL）与预算硬约束无关，全绿不陪跑。
+
+## 候选① 弃用记录（改坏点必须在被测世界可达）
+
+计划候选①"注释检索 WHERE tenant_id"被弃：回放/CI 世界无 DASHSCOPE_API_KEY，
+检索恒 fail-open 空集，该 WHERE 根本不参与执行路径——注释它不会让任何回放用例
+变红，"绿"零信息量。这是 M4.0④b"探针必须先实证会被抓再推"纪律的回放版：
+红绿验证的改坏点必须落在被测世界真正执行的语句上。
+
+## 还原与收尾
+
+还原探针行后 tests/replay 复绿 15/15；本仓 `git status --short` 干净
+（探针全程未触碰本仓工作区）。
