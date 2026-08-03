@@ -15,7 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -73,4 +73,16 @@ class ChunkRecord(Base):
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (UniqueConstraint("document_id", "seq", name="uq_chunks_document_seq"),)
+    __table_args__ = (
+        UniqueConstraint("document_id", "seq", name="uq_chunks_document_seq"),
+        # HNSW 索引在 ORM 侧留声明（M4.0③ #4）：迁移里仍是手写 DDL（`7fe5de25a9ca:61`，
+        # autogenerate **不会生成** USING hnsw，那条注释依然成立），但它**会比对**——
+        # ORM 不声明则 `alembic check` 恒报 remove_index，等于这道门永远红。
+        # 参数须与迁移逐字对应：余弦距离簇（<=> 算子），m/ef_construction 用 pgvector 缺省。
+        Index(
+            "ix_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
