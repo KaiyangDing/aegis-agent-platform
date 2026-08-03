@@ -25,11 +25,18 @@ CORPUS_ROOT = ROOT / "data" / "corpus"
 _SEED_SCRIPT = ROOT / "scripts" / "seed_demo.py"
 
 _CATEGORIES = {"retrieval", "e2e", "adversarial"}
-_KINDS = {"isolation", "out_of_kb", "retrieval", "normal"}
-_KIND_TO_CATEGORY = {"isolation": "adversarial", "out_of_kb": "e2e", "normal": "e2e", "retrieval": "retrieval"}
+# M4.5 拍板 3：新细分类 injection（prompt 注入类；facet 仍是 isolation 专用字段）
+_KINDS = {"isolation", "out_of_kb", "retrieval", "normal", "injection"}
+_KIND_TO_CATEGORY = {
+    "isolation": "adversarial",
+    "out_of_kb": "e2e",
+    "normal": "e2e",
+    "retrieval": "retrieval",
+    "injection": "adversarial",
+}
 _FACETS = {"knowledge", "order", "approval"}
 _BEHAVIORS = {"fallback_or_handoff", "no_leak", "denied", "answered"}
-_PREFIX = {"isolation": "iso-", "out_of_kb": "okb-", "retrieval": "ret-", "normal": "nor-"}
+_PREFIX = {"isolation": "iso-", "out_of_kb": "okb-", "retrieval": "ret-", "normal": "nor-", "injection": "inj-"}
 _REQUIRED = {"id", "tenant_id", "user_id", "category", "question", "expectation", "source"}
 _ORDER_REF = re.compile(r"[A-Z]{2}-\d{4}")
 
@@ -145,3 +152,18 @@ def test_isolation_forbidden_strings_not_in_own_corpus() -> None:
         own = _corpus_text(row["tenant_id"])
         for banned in expectation.get("must_not_contain", []):
             assert banned not in own, f"{row['id']} 禁现字面「{banned}」在 {row['tenant_id']} 自家语料里——判据自相矛盾"
+
+
+def test_total_cases_in_30_50() -> None:
+    """M4.5 总量契约（00 §8.1 M4.5 行）：30–50 条——低于 30=扩充没做完，高于 50=该砍不该堆。"""
+    n = len(_cases())
+    assert 30 <= n <= 50, f"总量 {n} 越界 [30, 50]"
+
+
+def test_each_category_min_coverage() -> None:
+    """三类各 ≥8（plans/m4 §5：防"扩充全堆一类"）——三类覆盖是 00 §8.2 第四条的字面要求。"""
+    counts: dict[str, int] = {}
+    for row in _cases():
+        counts[row["category"]] = counts.get(row["category"], 0) + 1
+    for cat in _CATEGORIES:
+        assert counts.get(cat, 0) >= 8, f"category={cat} 不足 8：{counts}"
