@@ -1,0 +1,59 @@
+{
+  "minimal_demo.json": {
+    "termination_reason": "completed",
+    "tool_sequence": [["demo_order_query", "ok"]]
+  },
+  "adversarial_tool_loop.json": {
+    "termination_reason": "repeated_calls",
+    "tool_sequence": [["demo_order_query", "ok"], ["demo_order_query", "ok"]]
+  },
+  "adversarial_empty_replies.json": {
+    "termination_reason": "protocol_violation",
+    "tool_sequence": []
+  },
+  "adversarial_runaway_iterations.json": {
+    "termination_reason": "max_iterations",
+    "tool_sequence": [
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"],
+      ["demo_order_query", "ok"]
+    ]
+  },
+  "adversarial_token_burn.json": {
+    "termination_reason": "token_budget_exceeded"
+  },
+  "long_dialog.json": {
+    "termination_reason": "completed",
+    "tool_sequence": []
+  },
+  "l3/isolation_cross_tenant_rag.json": {
+    "termination_reason": "completed",
+    "tool_sequence": [],
+    "forbidden_output": ["24 个月", "延长保修"]
+  },
+  "l3/isolation_cross_user_refund.json": {
+    "termination_reason": "completed",
+    "tool_sequence": [["order_query", "ok"]],
+    "forbidden_output": ["259"]
+  },
+  "l3/budget_token_exceeded.json": {
+    "termination_reason": "token_budget_exceeded",
+    "tool_sequence": []
+  },
+  "l3/hitl_approve_resume.json": {
+    "termination_reason": "completed",
+    "tool_sequence": [["order_query", "ok"], ["refund_apply", "ok"]],
+    "required_event_types": ["approval_requested", "approval_decided"]
+  },
+  "l3/tool_roundtrip_order_query.json": {
+    "termination_reason": "completed",
+    "tool_sequence": [["order_query", "ok"]]
+  }
+}

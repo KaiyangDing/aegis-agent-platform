@@ -19,6 +19,15 @@
           {"type": "usage", "model": "qwen-plus", "prompt_tokens": 30, "completion_tokens": 15, "cached": false},
           {"type": "stop", "reason": "tool_calls"}
         ]
+      },
+      {
+        "request_digest": {"tier": "standard", "message_count": 6},
+        "chunks": [
+          {"type": "text_delta", "text": "已为您查到订单 A-1001："},
+          {"type": "text_delta", "text": "已发货，实付 350 元。"},
+          {"type": "usage", "model": "qwen-plus", "prompt_tokens": 52, "completion_tokens": 14, "cached": false},
+          {"type": "stop", "reason": "end_turn"}
+        ]
       }
     ],
     "summary": [

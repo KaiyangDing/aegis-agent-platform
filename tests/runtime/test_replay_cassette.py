@@ -73,10 +73,13 @@ def _req(**kw: Any) -> LLMRequest:
 
 
 def test_minimal_demo_asset_loads() -> None:
-    """资产自检：手写 minimal_demo 可载入；chunk 经判别联合还原为真类型（schema.py:6 往返红利）。"""
+    """资产自检：手写 minimal_demo 可载入；chunk 经判别联合还原为真类型（schema.py:6 往返红利）。
+
+    main 道 3 条：M4.3 补第 3 条工具回填后终答（README §3 手写类资产手改），
+    两轮剧本自此可被行为回归端到端回放（tests/replay）——条目数断言随资产升级。"""
     c = Cassette.load(CASSETTES / "minimal_demo.json")
     assert c.session_id == "cs-demo-1"
-    assert len(c.scopes["main"]) == 2
+    assert len(c.scopes["main"]) == 3
     assert len(c.scopes["summary"]) == 1
     assert isinstance(c.scopes["main"][0].chunks[0], TextDelta)
     assert isinstance(c.scopes["main"][1].chunks[0], ToolCallChunk)
