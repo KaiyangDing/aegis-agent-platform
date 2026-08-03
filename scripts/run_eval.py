@@ -206,23 +206,29 @@ async def judge_case(
             ),
         ],
         tenant_id=case["tenant_id"],
-        session_id=f"eval-judge-{case['id']}",
+        session_id=case.get("_sid")
+        or f"eval-judge-{case['id']}",  # 与被评共用 sid（行成本按 sid 精确对账，防跨批 LIKE 撞）
         deadline_s=25.0,
     )
     parts: list[str] = []
     judge_model: str | None = None
     p_tokens = c_tokens = 0
     try:
-        stream = gateway.complete(request)
-        async with aclosing(stream):
-            async for chunk in stream:
-                kind = getattr(chunk, "type", "")
-                if kind == "text_delta":
-                    parts.append(chunk.text)
-                elif kind == "usage":
-                    judge_model = chunk.model  # C36：API 回显名，不是配置名
-                    p_tokens += chunk.prompt_tokens
-                    c_tokens += chunk.completion_tokens
+        # (58) 家族实录（M4.4④ 冒烟首炮抓获）：judge 是全项目首个 tenant_context 之外的
+        # 网关调用点——不包上下文，网关自动计量写 usage_ledger（RLS 名单表）被 WITH CHECK
+        # 拒成 42501（计量兜底不拖垮请求，但评测账本缺 judge 行=对账缺口）。
+        # judge 花销记在用例租户头上（拍板 4：月度闸门对两类调用都生效）。
+        with tenant_context(case["tenant_id"]):
+            stream = gateway.complete(request)
+            async with aclosing(stream):
+                async for chunk in stream:
+                    kind = getattr(chunk, "type", "")
+                    if kind == "text_delta":
+                        parts.append(chunk.text)
+                    elif kind == "usage":
+                        judge_model = chunk.model  # C36：API 回显名，不是配置名
+                        p_tokens += chunk.prompt_tokens
+                        c_tokens += chunk.completion_tokens
     except Exception as exc:  # 网关六类也好流中断也好：批次继续，本行 error
         return (
             CaseRow(case_id=case["id"], verdict=EvalVerdict.ERROR.value, judge_output={"error": str(exc)[:200]}),
@@ -327,6 +333,7 @@ async def _execute_real(case: dict[str, Any], *, sf: SessionFactory, runtime: Ag
         return "retrieval_hit" if hit else "retrieval_miss"
     seed = record.load_seed()
     sid = f"eval-{case['id']}-{uuid.uuid4().hex[:8]}"
+    case["_sid"] = sid  # judge 复用同 sid：一个用例一条账（冒烟批撞出的跨批 LIKE 缺口，M4.4④）
     spec = build_agent_spec(record.tenant_from_seed(seed, case["tenant_id"]))
     with tenant_context(case["tenant_id"]):
         await record._ensure_session(sf, sid, case["tenant_id"], case["user_id"])
@@ -410,7 +417,7 @@ async def main() -> None:
     async with owner() as s:
         async with s.begin():
             for row in report.rows:
-                cost = await _row_cost(row.case_id, report.batch_id)
+                cost = await _row_cost(cases_by_id[row.case_id].get("_sid"))
                 s.add(
                     EvalRunRecord(
                         batch_id=report.batch_id,
@@ -446,13 +453,15 @@ async def main() -> None:
     print(f"\n报告落盘：{out}")
 
 
-async def _row_cost(case_id: str, batch_id: str) -> Decimal:
-    """行成本从账本抓（被评+judge 同前缀 session）：与 usage_ledger 天然对账。"""
-    stmt = text(
-        "SELECT COALESCE(SUM(cost), 0) FROM usage_ledger WHERE session_id LIKE :like_sid OR session_id = :judge_sid"
-    )
+async def _row_cost(sid: str | None) -> Decimal:
+    """行成本从账本按精确 sid 抓（被评+judge 同 sid 一条账）——LIKE 前缀会跨批次
+    重复计入历史批花销（M4.4④ 冒烟对账实录：最终批行合计=账本全量），精确匹配根治。
+    sid=None（ci_pinned/retrieval 特判路径零对话）→ 0。"""
+    if sid is None:
+        return Decimal("0")
+    stmt = text("SELECT COALESCE(SUM(cost), 0) FROM usage_ledger WHERE session_id = :sid")
     async with get_owner_session_factory()() as s:
-        row = (await s.execute(stmt, {"like_sid": f"eval-{case_id}-%", "judge_sid": f"eval-judge-{case_id}"})).one()
+        row = (await s.execute(stmt, {"sid": sid})).one()
     return Decimal(str(row[0]))
 
 
