@@ -56,24 +56,27 @@ async def test_refund_rejects_refunded_order(db_session_factory, caplog) -> None
     """TOCTOU 主场景：批准落锤前订单已退款 → 拒绝、不执行。
 
     M4.0② 候选②改判：拒因**不再点名"已退款"**（订单状态是他人可能不该知道的事实，
-    见 `_STALE_TEXT` 论证）——本条要钉的是"拒不拒"这个行为，"为什么拒"移交日志面。
+    见 `_STALE_TEXT` 论证）——observation 只钉"拒不拒"；M4.1③ 补上另一半：
+    "为什么拒"进 detail（审计面，随 precheck_vetoed 事件落盘）与日志。
     """
     await _seed_order(db_session_factory, "rv-done-1", status=MockOrderStatus.REFUNDED.value)
     precheck = build_precheck(db_session_factory)
     with caplog.at_level(logging.WARNING, logger="aegis.apps.support.revalidate"):
-        reason = await precheck("refund_apply", {"order_id": "rv-done-1", "amount": 80.0})
-    assert reason is not None
-    assert "已退款" not in reason  # 不出线给模型
-    assert any("已退款" in r.message for r in caplog.records)  # 但审计面照旧可诊断
+        veto = await precheck("refund_apply", {"order_id": "rv-done-1", "amount": 80.0})
+    assert veto is not None
+    assert "已退款" not in veto.observation  # 不出线给模型
+    assert veto.detail is not None and "已退款" in veto.detail  # 审计面拿到具体拒因
+    assert any("已退款" in r.message for r in caplog.records)  # 日志面照旧可诊断
 
 
 async def test_refund_rejects_over_paid_amount(db_session_factory) -> None:
-    """金额超过可退上限 → 拒绝，但拒因**不得携带订单事实**（M4.0② 候选②改判）。"""
+    """金额超上限 → 拒绝：observation 不携带订单事实（M4.0②），detail 携带（M4.1③）。"""
     await _seed_order(db_session_factory, "rv-over-1", amount="300.00")
     precheck = build_precheck(db_session_factory)
-    reason = await precheck("refund_apply", {"order_id": "rv-over-1", "amount": 300.01})
-    assert reason is not None
-    assert "300.00" not in reason  # 他人订单的实付金额绝不出线
+    veto = await precheck("refund_apply", {"order_id": "rv-over-1", "amount": 300.01})
+    assert veto is not None
+    assert "300.00" not in veto.observation  # 他人订单的实付金额绝不出线给模型
+    assert veto.detail is not None and "300.00" in veto.detail  # 上限值进审计面——排障不打折
 
 
 async def test_order_derived_reasons_are_indistinguishable(db_session_factory, caplog) -> None:
@@ -97,10 +100,26 @@ async def test_order_derived_reasons_are_indistinguishable(db_session_factory, c
         already_refunded = await precheck("refund_apply", {"order_id": "rv-uni-done", "amount": 10.0})
         not_found = await precheck("refund_apply", {"order_id": "rv-uni-ghost", "amount": 10.0})
 
-    assert over_limit == already_refunded == not_found  # 三路逐字节同话术
-    assert over_limit is not None and "300.00" not in over_limit
-    # 审计面不打折：三次拒绝各留一条可诊断的 warning（细节归日志，不归模型）
+    assert over_limit is not None and already_refunded is not None and not_found is not None
+    # 模型面：三路 observation 逐字节同话术（oracle 抹平）
+    assert over_limit.observation == already_refunded.observation == not_found.observation
+    assert "300.00" not in over_limit.observation
+    # 审计面（M4.1③）：三路 detail 互不相同——可区分性是审计面的职责，不是泄漏
+    details = {over_limit.detail, already_refunded.detail, not_found.detail}
+    assert None not in details and len(details) == 3
+    # 日志面不打折：三次拒绝各留一条可诊断的 warning
     assert sum(1 for r in caplog.records if "前置校验拒绝" in r.message) == 3
+
+
+async def test_order_derived_detail_carries_specifics(db_session_factory) -> None:
+    """M4.1③ detail 契约：具体拒因（单号/上限）在审计面完整可诊断——
+    trace API（仅 operator/admin）与日志由此对齐，坐席不再看到"批准了却没执行"的哑谜。"""
+    await _seed_order(db_session_factory, "rv-dt-1", amount="300.00")
+    precheck = build_precheck(db_session_factory)
+    veto = await precheck("refund_apply", {"order_id": "rv-dt-1", "amount": 999.0})
+    assert veto is not None and veto.detail is not None
+    assert "rv-dt-1" in veto.detail  # 哪张单
+    assert "999" in veto.detail and "300.00" in veto.detail  # 要多少、上限多少
 
 
 async def test_malformed_amount_reason_may_stay_specific(db_session_factory) -> None:
@@ -110,15 +129,17 @@ async def test_malformed_amount_reason_may_stay_specific(db_session_factory) -> 
     """
     await _seed_order(db_session_factory, "rv-arg-1")
     precheck = build_precheck(db_session_factory)
-    reason = await precheck("refund_apply", {"order_id": "rv-arg-1", "amount": -5})
-    assert reason is not None and "正数" in reason
+    veto = await precheck("refund_apply", {"order_id": "rv-arg-1", "amount": -5})
+    assert veto is not None and "正数" in veto.observation
+    assert veto.detail is None  # 参数事实无审计增量：observation 已是全部信息
 
 
 async def test_refund_rejects_missing_order(db_session_factory) -> None:
-    """订单查无（或 RLS 场内不可见）→ fail-closed 拒绝。"""
+    """订单查无（或 RLS 场内不可见）→ fail-closed 拒绝；单号进审计面。"""
     precheck = build_precheck(db_session_factory)
-    reason = await precheck("refund_apply", {"order_id": "rv-ghost", "amount": 10.0})
-    assert reason is not None
+    veto = await precheck("refund_apply", {"order_id": "rv-ghost", "amount": 10.0})
+    assert veto is not None
+    assert veto.detail is not None and "rv-ghost" in veto.detail
 
 
 @pytest.mark.parametrize("bad_amount", ["abc", -1, 0])
@@ -126,8 +147,8 @@ async def test_refund_rejects_malformed_amount(db_session_factory, bad_amount: A
     """金额非法（非数/非正）→ 拒绝：校验器不信任快照里的任何字段形状。"""
     await _seed_order(db_session_factory, f"rv-bad-{bad_amount}")
     precheck = build_precheck(db_session_factory)
-    reason = await precheck("refund_apply", {"order_id": f"rv-bad-{bad_amount}", "amount": bad_amount})
-    assert reason is not None
+    veto = await precheck("refund_apply", {"order_id": f"rv-bad-{bad_amount}", "amount": bad_amount})
+    assert veto is not None
 
 
 async def test_coupon_pass_when_order_exists(db_session_factory) -> None:
@@ -139,8 +160,9 @@ async def test_coupon_pass_when_order_exists(db_session_factory) -> None:
 
 async def test_coupon_rejects_missing_order(db_session_factory) -> None:
     precheck = build_precheck(db_session_factory)
-    reason = await precheck("coupon_grant", {"order_id": "rv-cp-ghost", "amount": 20.0})
-    assert reason is not None
+    veto = await precheck("coupon_grant", {"order_id": "rv-cp-ghost", "amount": 20.0})
+    assert veto is not None
+    assert veto.detail is not None and "rv-cp-ghost" in veto.detail
 
 
 async def test_unregistered_tool_fail_closed(db_session_factory, caplog) -> None:
@@ -148,8 +170,9 @@ async def test_unregistered_tool_fail_closed(db_session_factory, caplog) -> None
     fail-closed 拒绝 + warning 留痕（确定性安全闸门方向，00 §2.2 C34 分野左边）。"""
     precheck = build_precheck(db_session_factory)
     with caplog.at_level(logging.WARNING, logger="aegis.apps.support.revalidate"):
-        reason = await precheck("order_query", {"order_id": "rv-any"})
-    assert reason is not None and "order_query" in reason
+        veto = await precheck("order_query", {"order_id": "rv-any"})
+    assert veto is not None and "order_query" in veto.observation
+    assert veto.detail is None  # 配置病灶不涉他人订单事实，observation 即全部
     assert any("前置校验器" in r.message for r in caplog.records)
 
 

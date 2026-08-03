@@ -25,7 +25,7 @@ from aegis.gateway.schema import (
     UsageChunk,
 )
 from aegis.runtime.events import AgentEvent, EventType
-from aegis.runtime.runtime import AgentRuntime
+from aegis.runtime.runtime import AgentRuntime, PrecheckVeto
 from aegis.runtime.spec import AgentSpec
 from aegis.runtime.store import (
     ApprovalRecord,
@@ -276,27 +276,37 @@ async def test_run_while_locked_raises_409_signal(r, db_session_factory, make_se
 
 
 async def test_precheck_veto_feeds_back_without_execution(db_session_factory, make_session, demo_registry) -> None:
-    """批准后前置校验否决（D19/M3.9 挂点）：工具不执行（无 tool_call）、原因回填模型、续跑至完成。"""
+    """批准后前置校验否决（D19/M3.9 挂点；M4.1③ 升级）：工具不执行（无 tool_call）、
+    observation 回填模型续跑至完成；否决本身落 precheck_vetoed 审计事件——
+    detail 只进事件 payload，绝不进模型上下文（审计面与模型面分离）。"""
     await make_session("sr-13")
     runtime, spec, _, s_events = await _suspend(db_session_factory, demo_registry, "sr-13")
     aid = _approval_id(s_events)
     await ApprovalStore(db_session_factory).decide(aid, approved=True, operator_id="op-1")
 
-    async def veto(tool_name: str, args: Mapping[str, object]) -> str | None:
-        return "订单已发货不可退"
+    async def veto(tool_name: str, args: Mapping[str, object]) -> PrecheckVeto | None:
+        return PrecheckVeto("订单已发货不可退", detail="快照复核：status=shipped limit=350")
 
     gateway2 = _ScriptedGateway([_text_turn("抱歉，该订单已发货无法退款。")])
     rt2 = AgentRuntime(gateway2, db_session_factory, precheck=veto)
     r_events = [e async for e in rt2.resume(spec, "sr-13", aid)]
     assert [e.type for e in r_events] == [
         EventType.APPROVAL_DECIDED,
+        EventType.PRECHECK_VETOED,
         EventType.LLM_CALL,
         EventType.LLM_RESULT,
         EventType.ASSISTANT_MESSAGE,
         EventType.LOOP_TERMINATED,
     ]
+    assert r_events[1].payload == {
+        "approval_id": aid,
+        "tool_name": "demo_refund_apply",
+        "observation": "订单已发货不可退",
+        "detail": "快照复核：status=shipped limit=350",
+    }
     prompt_blob = "\n".join(m.content for m in gateway2.requests[0].messages)
-    assert "订单已发货不可退" in prompt_blob  # 否决原因作为观察结果进 prompt
+    assert "订单已发货不可退" in prompt_blob  # observation 作为观察结果进 prompt
+    assert "快照复核" not in prompt_blob  # detail 绝不进模型上下文——分离本体
     assert r_events[-1].payload["reason"] == "completed"
 
 

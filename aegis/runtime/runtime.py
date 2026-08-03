@@ -15,6 +15,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing, asynccontextmanager, suppress
+from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -57,9 +58,25 @@ class GatewayLike(Protocol):
     def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]: ...
 
 
-PrecheckHook = Callable[[str, Mapping[str, Any]], Awaitable[str | None]]
-"""批准后前置校验挂点（00 §10.1 #8）：(tool_name, args 快照) -> None=通过 / str=拒绝原因。
-校验逻辑（订单状态/可退余额）M3.9 注入；M2 默认 None=全通过。"""
+@dataclass(frozen=True, slots=True)
+class PrecheckVeto:
+    """前置校验否决的两面（M4.1③，00 §10.1 #50 候选② 信息面另一半）。
+
+    observation 回填模型——拿不到身份的层说出口的话必须对所有身份安全
+    （订单派生拒因统一话术，站 10 口径⑴）；detail 是审计细节（具体状态/
+    金额上限），只进 precheck_vetoed 事件 payload 与日志，经 trace API 仅
+    operator/admin 可读——绝不进模型上下文与用户面。
+    """
+
+    observation: str
+    detail: str | None = None
+
+
+PrecheckHook = Callable[[str, Mapping[str, Any]], Awaitable[PrecheckVeto | None]]
+"""批准后前置校验挂点（00 §10.1 #8）：(tool_name, args 快照) -> None=通过 / PrecheckVeto=拒绝。
+校验逻辑（订单状态/可退余额）M3.9 注入；M2 默认 None=全通过。
+M4.1③ 签名升级（str → PrecheckVeto）：单一 str 既当模型观察又当审计内容，
+细节无处安放——升级后审计面与模型面分离，否决本身落 precheck_vetoed 事件。"""
 
 TextSink = Callable[[str], Awaitable[None]]
 """逐 token 通道缝（M3.10 拍板Ⅱ）：OutputGuard 放行的可见文本段推送口。
@@ -563,8 +580,18 @@ class AgentRuntime:
                 veto = None if self._precheck is None else await self._precheck(claim.tool_name, claim_args)
                 if veto is not None:
                     # D19 同款：否决不终止；单据保持未回填（无执行事件可挂）——再崩会再校验，
-                    # 与 _resume_locked veto 行为一致（已知边界，14i 拍板Ⅳ）
-                    claimed_content = _PRECHECK_VETO_TEMPLATE.format(reason=veto)
+                    # 与 _resume_locked veto 行为一致（已知边界，14i 拍板Ⅳ）。
+                    # M4.1③：否决落审计事件——detail 只活在这里与日志，不进模型上下文
+                    await tap.append(
+                        EventType.PRECHECK_VETOED,
+                        {
+                            "approval_id": claim.id,
+                            "tool_name": claim.tool_name,
+                            "observation": veto.observation,
+                            "detail": veto.detail,
+                        },
+                    )
+                    claimed_content = _PRECHECK_VETO_TEMPLATE.format(reason=veto.observation)
                 else:
                     outcome = await executor.execute(
                         claim.tool_name, json.dumps(dict(claim_args), ensure_ascii=False), approved=True
@@ -690,8 +717,19 @@ class AgentRuntime:
             args: Mapping[str, Any] = approval.args
             veto = None if self._precheck is None else await self._precheck(approval.tool_name, args)
             if veto is not None:
-                # D19：否决不终止——工具不执行（无 write-ahead），原因作为观察结果回填模型
-                approved_content = _PRECHECK_VETO_TEMPLATE.format(reason=veto)
+                # D19：否决不终止——工具不执行（无 write-ahead），observation 作为观察结果
+                # 回填模型；M4.1③：否决落审计事件（与 _recover_locked 认领支同款），
+                # detail 只进事件 payload 与日志，绝不进模型上下文
+                await tap.append(
+                    EventType.PRECHECK_VETOED,
+                    {
+                        "approval_id": approval_id,
+                        "tool_name": approval.tool_name,
+                        "observation": veto.observation,
+                        "detail": veto.detail,
+                    },
+                )
+                approved_content = _PRECHECK_VETO_TEMPLATE.format(reason=veto.observation)
             else:
                 outcome = await executor.execute(
                     approval.tool_name, json.dumps(dict(args), ensure_ascii=False), approved=True

@@ -11,8 +11,10 @@ from aegis.runtime.events import SCHEMA_VERSION, AgentEvent, EventType
 
 
 def test_event_type_values_are_stable() -> None:
-    """16 类值快照（03 §5 表；M2.2 按 C8 增 summary_updated，M2.8 按 D6 增 guardrail_triggered，
-    M2.10 按 C9 增 recovery_abandoned）。再加成员先让这里红、过口径再改。"""
+    """17 类值快照（03 §5 表；M2.2 按 C8 增 summary_updated，M2.8 按 D6 增 guardrail_triggered，
+    M2.10 按 C9 增 recovery_abandoned，M4.1③ 按候选② 信息面增 precheck_vetoed——
+    03 §5 表/本快照/C31 归一化三处联动已核，normalize 对顶层 approval_id 通用别名化零改动）。
+    再加成员先让这里红、过口径再改。"""
     assert {e.value for e in EventType} == {
         "user_message",
         "assistant_message",
@@ -30,6 +32,7 @@ def test_event_type_values_are_stable() -> None:
         "summary_updated",
         "guardrail_triggered",
         "recovery_abandoned",
+        "precheck_vetoed",
     }
 
 

@@ -31,7 +31,7 @@ from aegis.gateway.schema import (
     UsageChunk,
 )
 from aegis.runtime.events import EventType
-from aegis.runtime.runtime import AgentRuntime
+from aegis.runtime.runtime import AgentRuntime, PrecheckVeto
 from aegis.runtime.spec import AgentSpec
 from aegis.runtime.store import ApprovalRecord, ApprovalStore, EventRecord, RunState, SessionRecord, SessionStateStore
 
@@ -78,8 +78,8 @@ def _spec(registry) -> AgentSpec:
     return AgentSpec(system_prompt="你是演示客服。", tools=registry.specs(), tenant_config={"approval_threshold": 200})
 
 
-async def _veto(tool_name: str, args) -> str | None:
-    return "订单状态已变化不可退"
+async def _veto(tool_name: str, args) -> PrecheckVeto | None:
+    return PrecheckVeto("订单状态已变化不可退")
 
 
 async def _make_orphan_veto_session(factory, registry, session_id: str) -> tuple[AgentSpec, str]:

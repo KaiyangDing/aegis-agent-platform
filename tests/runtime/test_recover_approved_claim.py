@@ -25,7 +25,7 @@ from aegis.gateway.schema import (
     UsageChunk,
 )
 from aegis.runtime.events import AgentEvent, EventType
-from aegis.runtime.runtime import AgentRuntime
+from aegis.runtime.runtime import AgentRuntime, PrecheckVeto
 from aegis.runtime.spec import AgentSpec
 from aegis.runtime.store import (
     ApprovalRecord,
@@ -216,26 +216,35 @@ async def test_claim_after_terminal_attaches_without_reexecution(
 
 
 async def test_claim_veto_feeds_back_and_leaves_orphan(db_session_factory, make_session, demo_registry) -> None:
-    """认领路径同样过前置校验（#8 批准不豁免）：否决→不执行、原因回填续跑；
+    """认领路径同样过前置校验（#8 批准不豁免；M4.1③ 升级）：否决→不执行、observation
+    回填续跑、precheck_vetoed 审计事件与 _resume_locked 路径同款（两调用位同一行为）；
     单据保持未回填（无执行事件可挂）——已知边界，14i 拍板Ⅳ 登记。"""
     await make_session("cl-5")
     spec, aid, _ = await _suspend_and_approve(db_session_factory, demo_registry, "cl-5")
 
-    async def veto(tool_name: str, args) -> str | None:
-        return "订单状态已变化不可退"
+    async def veto(tool_name: str, args) -> PrecheckVeto | None:
+        return PrecheckVeto("订单状态已变化不可退", detail="快照复核：status=refunded")
 
     gateway = _ScriptedGateway([_text_turn("抱歉，该订单当前状态无法退款。")])
     runtime = AgentRuntime(gateway, db_session_factory, precheck=veto)
     r_events = [e async for e in runtime.resume(spec, "cl-5", None)]
     assert [e.type for e in r_events] == [
         EventType.APPROVAL_DECIDED,
+        EventType.PRECHECK_VETOED,
         EventType.LLM_CALL,
         EventType.LLM_RESULT,
         EventType.ASSISTANT_MESSAGE,
         EventType.LOOP_TERMINATED,
     ]
+    assert r_events[1].payload == {
+        "approval_id": aid,
+        "tool_name": "demo_refund_apply",
+        "observation": "订单状态已变化不可退",
+        "detail": "快照复核：status=refunded",
+    }
     prompt_blob = "\n".join(m.content for m in gateway.requests[0].messages)
-    assert "订单状态已变化不可退" in prompt_blob  # 否决原因作为观察结果进 prompt
+    assert "订单状态已变化不可退" in prompt_blob  # observation 作为观察结果进 prompt
+    assert "快照复核" not in prompt_blob  # detail 只进审计面，不进模型上下文
     assert await _count(db_session_factory, "cl-5", EventType.TOOL_CALL) == 0
     assert (await _approval(db_session_factory, aid)).event_id is None
     assert r_events[-1].payload["reason"] == "completed"
@@ -246,8 +255,8 @@ async def test_terminated_tail_wins_over_claim(db_session_factory, make_session,
     await make_session("cl-6")
     spec, aid, _ = await _suspend_and_approve(db_session_factory, demo_registry, "cl-6")
 
-    async def veto(tool_name: str, args) -> str | None:
-        return "不可退"
+    async def veto(tool_name: str, args) -> PrecheckVeto | None:
+        return PrecheckVeto("不可退")
 
     runtime = AgentRuntime(_ScriptedGateway([_text_turn("无法退款。")]), db_session_factory, precheck=veto)
     r_events = [e async for e in runtime.resume(spec, "cl-6", None)]

@@ -19,9 +19,9 @@ SCHEMA_VERSION = 1
 
 
 class EventType(StrEnum):
-    """事件类型全集（03 §5 表，16 类——C8 增 summary_updated、M2.8 D6 增 guardrail_triggered、
-    M2.10 C9 增 recovery_abandoned）。值进 events 表与回放断言，快照测试钉死；
-    加成员必须显式过口径后更新快照。"""
+    """事件类型全集（03 §5 表，17 类——C8 增 summary_updated、M2.8 D6 增 guardrail_triggered、
+    M2.10 C9 增 recovery_abandoned、M4.1③ 增 precheck_vetoed）。值进 events 表与回放断言，
+    快照测试钉死；加成员必须显式过口径后更新快照。"""
 
     USER_MESSAGE = "user_message"
     ASSISTANT_MESSAGE = "assistant_message"
@@ -39,6 +39,7 @@ class EventType(StrEnum):
     HANDOFF = "handoff"
     GUARDRAIL_TRIGGERED = "guardrail_triggered"
     RECOVERY_ABANDONED = "recovery_abandoned"
+    PRECHECK_VETOED = "precheck_vetoed"
 
 
 @dataclass(frozen=True, slots=True)
