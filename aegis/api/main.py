@@ -13,7 +13,8 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
-from aegis.api import approvals, chat, events_view, kb, stream, usage
+from aegis.api import approvals, chat, events_view, kb, metrics_view, stream, usage
+from aegis.api.metrics_view import RequestCounterMiddleware
 from aegis.api.notify import EventNotifier
 from aegis.api.ratelimit import InboundLimiterLike
 from aegis.apps.support.rag.retrieve import RetrievalProvider, Retriever
@@ -67,6 +68,7 @@ def create_app(
             await notify.stop()
 
     app = FastAPI(title="Aegis", version="0.1.0", lifespan=_lifespan)
+    app.add_middleware(RequestCounterMiddleware)  # M4.2②：纯 ASGI 透传计数，对 SSE 零干扰
     app.state.settings = s
     app.state.session_factory = factory
     gw = gateway
@@ -101,6 +103,7 @@ def create_app(
     app.include_router(approvals.router)
     app.include_router(stream.router)
     app.include_router(events_view.router)
+    app.include_router(metrics_view.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:  # 存活探针（02 §9）：不查依赖，进程活着就 200

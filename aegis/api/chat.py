@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
@@ -26,6 +27,7 @@ from aegis.api.sse import encode_frame
 from aegis.apps.support.service import ChatFrame, ChatService
 from aegis.core.locks import SessionLockHeld
 from aegis.core.tenancy import Role, SessionFactory
+from aegis.obs.metrics import CHAT_FIRST_TOKEN_S, CHAT_REQUEST_S
 from aegis.runtime.runtime import AgentRuntime
 from aegis.runtime.store import (
     ApprovalRecord,
@@ -116,16 +118,33 @@ def _short_stream(frames: list[ChatFrame]) -> StreamingResponse:
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
-async def _relay(first: ChatFrame, rest: AsyncIterator[ChatFrame]) -> AsyncIterator[str]:
+async def _relay(first: ChatFrame, rest: AsyncIterator[ChatFrame], *, t0: float, tenant_id: str) -> AsyncIterator[str]:
     """已开流的中继：此后异常无法改状态码，译 error 帧收流（已落盘事件不受影响，
-    用户可经 GET 通道重连取回真相）。"""
+    用户可经 GET 通道重连取回真相）。
+
+    M4.2② 打点：首个 kind=="token" 帧记首 token 延迟（首帧可能是 tool_status，
+    "首帧"不等于"首 token"——口径与 M3.12/M5.2 同轴）；finally 记全程时长
+    （含 error 收流路径——失败的请求也是延迟样本，不数=幸存者偏差）。
+    """
+    saw_token = False
+
+    def _note(frame: ChatFrame) -> None:
+        nonlocal saw_token
+        if not saw_token and frame.kind == "token":
+            saw_token = True
+            CHAT_FIRST_TOKEN_S.labels(tenant_id=tenant_id).observe(time.monotonic() - t0)
+
     try:
+        _note(first)
         yield encode_frame(first)
         async for frame in rest:
+            _note(frame)
             yield encode_frame(frame)
     except Exception:
         logger.exception("SSE 流中异常——译为 error 帧收流")
         yield encode_frame(ChatFrame("error", {"message": "服务暂时不可用，请稍后重试"}))
+    finally:
+        CHAT_REQUEST_S.labels(tenant_id=tenant_id).observe(time.monotonic() - t0)
 
 
 @router.post("/v1/chat")
@@ -134,6 +153,7 @@ async def post_chat(
     body: ChatRequest,
     principal: Annotated[Principal, Depends(_ADMITTED)],
 ) -> StreamingResponse:
+    t0 = time.monotonic()  # M4.2②：首 token/全程延迟起点=进入 handler（含准入后全部编排）
     factory: SessionFactory = request.app.state.session_factory
     runtime: AgentRuntime = request.app.state.runtime
     service: ChatService | None = request.app.state.chat_service
@@ -196,4 +216,8 @@ async def post_chat(
         raise
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="会话状态冲突，请稍后重试") from e
-    return StreamingResponse(_relay(first, stream), media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(
+        _relay(first, stream, t0=t0, tenant_id=principal.tenant_id),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
