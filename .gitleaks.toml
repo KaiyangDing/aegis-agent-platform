@@ -19,10 +19,25 @@ useDefault = true
 [allowlist]
 description = "经核实的无害匹配（每条须写明理由；新增豁免必须在 PR 里被看见）"
 
-# 演示/测试用的固定弱口令：compose 与测试连接串里的 aegis:aegis / aegis_app:aegis_app。
-# 它们是本地开发容器的凭据，端口只绑 127.0.0.1（07 §3 第 7 条），生产走 secrets（02 §5）。
+# 【粒度纪律】一律按**串本身的形态**豁免，绝不按目录豁免。
+# 反例：把整个 tests/ 加进 paths 会让真 key 误提交进测试文件时也不报警——
+# 而"测试里粘了一把真 key"恰恰是最常见的泄漏姿势之一。
 regexes = [
+  # ① 本地开发容器弱口令：compose 与测试连接串。端口只绑 127.0.0.1（07 §3 第 7 条），
+  #    生产走 secrets（02 §5 备份口径同款声明）。
   '''postgresql\+asyncpg://aegis(_app)?:aegis(_app)?@''',
+
+  # ② JWT 测试密钥族（M4.0④b 全历史扫描实测命中 5 处）：命名恒为
+  #    `<用途>-(test-)?secret-0123456789…`，长度 ≥32B 是 RFC 7518 下限——
+  #    该下限本身是 M3.1② "弱钥升硬错误"逼出来的，故这些串必须够长、也必然高熵。
+  '''[a-z0-9-]+-(test-)?secret-0123456789[a-z-]*''',
+
+  # ③ 供应商 key 的**假样本**：全部用于验证打码/鉴权头拼装，形态固定。
+  #    `sk-abc123DEF456ghi789` 尤其正当——它是 sanitize_error_text 的**被打码对象**
+  #    （tests/gateway/test_base.py），存在理由就是防止真 key 泄漏。
+  '''sk-abc123DEF456ghi789''',
+  '''sk-(ant-)?test\b''',
+  '''sk-super-secret''',
 ]
 
 # cassette 与 reports 是录制产物：内含模型返回的文本与 usage，不含凭据；
