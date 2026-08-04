@@ -21,6 +21,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "import-linter>=2.13",
+    "locust>=2.46.3",
     "mypy>=2.2.0",
     "pip-audit>=2.10.1",
     "pytest>=9.1.1",
@@ -62,9 +63,14 @@ ignore_missing_imports = true
 module = "asyncpg.*"            # asyncpg 无 py.typed（M3.10③ LISTEN 首次直接 import，实测后加——celery 同款）
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "gevent.*"             # gevent 无 py.typed（M5.1 locustfile 直接 import，实测后加——同款）
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"          # async def 的测试函数自动被识别，不用逐个加装饰器
+pythonpath = ["."]             # M5.1 D4：tests/loadtest 可 import scripts.loadtest.sse_client（纯函数进 CI）
 
 [tool.importlinter]
 root_package = "aegis"
