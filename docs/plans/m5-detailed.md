@@ -21,6 +21,25 @@
 > threshold=5/open=30/probe_ttl=120 实核无漂移；0-13 locust 确未安装；0-9 README 初稿在
 > （M5.5 只做终稿）。
 >
+> **M5.1–M5.4 落地实况（2026-08-03/04，随步追加；提交对账表 M5.6 建于 00 §9）**：
+> M5.1–M5.3 无新增计划面偏差（D1/P8' 已在 M5.0 块预登记；口径①报告以 21,600ms 注入基线
+> 立账=OutputGuard 对无边界合成文本整段 flush 的实测形态，报告§口径段自带）。**M5.4 实况七条**：
+> ⑴ 交付③ 按 P6 对象执行，脚本名 `experiment_qwen_tier_failover.py`（§8 表 M5.4 行 deepseek
+> 文件名随对象替换）；⑵ **(58) 家族第三例**：两补录实验首跑均空账——裸网关驱动缺
+> `tenant_context` 配对，计量被 usage_ledger RLS 静默拒收（fail-open）；demo 排练首遍暴露，
+> 两脚本补配对**重跑出真账版**（breaker 三轮 32.5/31.7/32.3s、¥0.0001；failover 20/20+
+> ledger 20 行、¥0.0003），报告内注记首跑空账史，failover 增设"空账即断言失败不出报告"；
+> ⑶ 计划外新增 `scripts/demo_m5_highlights.py`（分镜"操作"列的可复跑驱动器，prep/h1–h4/all
+> 子命令；段间状态 `.demo_tokens.json`/`.demo_state.json` 入 gitignore——短时 JWT 不入库）；
+> ⑷ 高光2 全弧实测形态=挂起→`docker kill` 副本→幸存副本 decide **3s 读超时断连**→事实面
+> kill 后 ~5s 落地（events 三事件+订单 refunded）→用户 GET /stream 回放闭环——(57) approvals
+> 断连余账清账；两枚实测行为差入分镜失败预案（手动 kill 不触发 unless-stopped 自启／精确缓存
+> 可使续跑快于 3s 断连窗）；⑸ #14 复验 ✅（2026-08-04 停 Redis 容器实跑，凭证行入
+> demo-script.md 彩排清单，`m2_degradation_redis.txt` 刷新）；⑹ (72)(77) 连带清账随本步提交
+> （stream 译表按 run_id 分段清零+见证测试；chat.html POST 失败自动 resubscribe——M4.2 移位单
+> 末两条，00 §10.1-bis 已翻 ✅）；⑺ 排练 4 遍全绿、逐段计时登记 demo-script.md（机器时间
+> <1min，"实测 ≤15 分钟"判定成立）。
+>
 > **消费方式**：先读 00 §9 全章（步骤行是权威范围）+ §10.2 + 本文件全文，强制执行 §0 核对清单。
 > M5 距写作时点隔着 M2.5–M4.8 共 31 步（9+13+9，00 §6.1/§7.1/§8.1 实数）——本文件是五份计划中「未来最远」的一份，
 > 【开工核对】密度最高：任何一处与实况对不上，先停下修订本计划，再动手。

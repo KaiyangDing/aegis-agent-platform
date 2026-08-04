@@ -1,5 +1,5 @@
 前置确认：Redis 不可达（TimeoutError）——演示条件成立
-并发两协程抢同一会话锁 session=demo-lock-bcf0c127
+并发两协程抢同一会话锁 session=demo-lock-d9205fa6
   协程 A acquire -> True；协程 B acquire -> False
   恰一个获锁成功（PG advisory 在降级期承接互斥）
   赢家释放 -> True

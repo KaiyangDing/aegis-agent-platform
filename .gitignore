@@ -17,3 +17,7 @@ __pycache__/
 # 构建产物
 dist/
 *.egg-info/
+
+# demo 段间状态（含短时 JWT，不入库）
+.demo_tokens.json
+.demo_state.json

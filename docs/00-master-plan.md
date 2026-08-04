@@ -462,11 +462,11 @@ M4.3 回放回归零 token。
 | 7 | ContextBuilder 检索/记忆槽位实装 | M2.5 只留接口 | **M3.5③ 检索槽已接电 ✅**（2026-07-25，`c4f0829`）：RetrievalProvider 适配器（retrieve.py）+ ContextBuilder 集成测试钉死；memory 槽位恒空=P1 砍出 v1（#20）；**M3.8② 生产注入已收尾 ✅**（2026-07-25，`0793b48`：AgentRuntime +retrieval 受控缝（拍板Ⅱ additive）+create_app 生产接线 RetrievalProvider(Retriever)） | ✅ |
 | 8 | 批准后前置校验重跑（M2 只留挂点） | M2.9 | **M3.9① 已实装 ✅**（2026-07-26，`aee4abb`）：apps/support/revalidate.py `build_precheck(factory)`→`AgentRuntime(precheck=…)` 生产接线（API create_app 与 worker _task_runtime 两侧共用）；PrecheckHook 无 ctx 冻结面下归属重校验由批准执行期 handler 以真实 ctx 兑现、revalidate 只管快照新鲜度；**TOCTOU 真实链路否决实证**（demo_hitl 段D：批准落锤前订单被退→不执行、approved∧event_id=空） | ✅ |
 | 9 | 设计文档迁入 repo | 记忆档案"M5 前" | M4.7 | **✅ M4.7-D（2026-08-03，`a20033e` 37 文件 17k 行）**：全量迁入 `docs/`+路径清零（历史行加时代注记）+CLAUDE.md 合并为仓库主入口+README 初稿（C43）+仓外 POINTER 防双写+C41 首次 pg_dump 落仓外 backups；修订批 `0f86b23`=④ HS256 叙事修正+附A #1#2#6 |
-| 10 | 熔断恢复闭合时间实测（**04 M1 验收未尽项，无条件补**） | 04 M1 验收 | M5.4 | ⬜ |
+| 10 | 熔断恢复闭合时间实测（**04 M1 验收未尽项，无条件补**） | 04 M1 验收 | M5.4 | **✅ 已实测（2026-08-04，`reports/m5_breaker_recovery.txt`）**：D8 定义（起点=上游恢复／终点=首次探针成功且 open/fails 键清零）三轮 **32.5/31.7/32.3s**，∈(探针耗时, 30s+探针] 预期区间、主导因子=open TTL 30s 设计值；首跑空账缺陷（裸网关缺 tenant_context 配对，(58) 家族第三例）补配对后重跑出真账版（¥0.0001） |
 | 11 | 出站限流计数口径升级为"按尝试"（现为按 HTTP 调用） | M1.12 注明 | 保持现口径，v2 再议 | 冻结 |
 | 12 | 限流精度 0.76% 落盘凭证（现仅会话内实测） | M1 凭证缺口 | 已落盘：2026-07-07 复测 0.76%（521/525），`reports/m2_ratelimit_retest.txt` 含口径注记（提交 `0a71488`） | ✅ |
 | 13 | 月度预算闸门读路径 config.py → tenants 表 | M3 建表 | **M3.1③ 已实装 ✅**（2026-07-24，`43db3a5`）：`monthly_budget_resolver` 注入缝（在场即事实源、读挂 fail-open、None 落回静态 int 既有测试零改动）+ factory 注入 `TenantDirectory.monthly_budget` | ✅ |
-| 14 | 会话锁 Redis 降级 PG advisory lock（**session 级 + 稳定哈希——评审 C4 修正**，不放弃互斥） | ADR-005/02 §5 | **M2.9 已实装 ✅**（`ab4fcd8`，dead_r 互斥测试钉死）；**M2.12 真停容器实录 ✅**（`reports/m2_degradation_redis.txt`，并发恰一互斥——依 §6.2 第 6 项凭证需求的计划级范围补充，plans/m2.12 §3.2-11）；M5.4 demo 排练复跑待 | ✅ 实装+实录 / ⬜ M5.4 复跑 |
+| 14 | 会话锁 Redis 降级 PG advisory lock（**session 级 + 稳定哈希——评审 C4 修正**，不放弃互斥） | ADR-005/02 §5 | **M2.9 已实装 ✅**（`ab4fcd8`，dead_r 互斥测试钉死）；**M2.12 真停容器实录 ✅**（`reports/m2_degradation_redis.txt`，并发恰一互斥——依 §6.2 第 6 项凭证需求的计划级范围补充，plans/m2.12 §3.2-11）；**M5.4 复验 ✅**（2026-08-04 停 Redis 容器实跑：并发恰一互斥／赢家释放／输家重取全 PASS，同凭证文件刷新，凭证行入 demo-script.md 彩排清单） | ✅ 实装+实录+M5.4 复验 |
 | 15 | 停 PG 演示：事件写入退避后终止、无半执行副作用 | 02 §5 | **M2.12 已完成 ✅**（`reports/m2_degradation_pg.txt`——write-ahead 核验式成立；实录抓出 OS 级连接错误白名单盲区，修复 `98e2549`） | ✅ |
 | 16 | 429 口径同步：02 §4"每次失败计入熔断窗口"旧表述修订 | M1 实装定稿 | 已同步（2026-07-06 修订 02 §4） | ✅ |
 | 17 | JWT 信任根：签发/验签算法/密钥托管与轮换设计 | 2026-07-07 评审 C12 | **M3.1② 已实装 ✅**（2026-07-24，`3a41a50`）：HS256+SecretStr 托管+previous 双密钥窗（仅签名不符才试旧钥）；弱钥 <32B 升硬错误（RFC 7518）；TTL 2h/8h | ✅ |
@@ -588,12 +588,12 @@ M4.3 回放回归零 token。
 | (69) | 单频道 `aegis_events` 全租户广播 | 边界 | v1 非泄漏（payload 仅路由键），代价在扩展性；分频道与"任意副本服务任意租户"冲突 |
 | (70) | `poll_interval_s` **一个旋钮两用途**（降级节拍想调小 × 重连退避想调大，方向相反且从未分别论证） | 边界 | 站 5 口径⑵"能被单独拧的旋钮不该与别的旋钮有隐式耦合"同族潜伏；拆成两参数是 v2 |
 | (71) | stream 端点 admin"平台级"被 RLS 拦成 404 | — | **✅ 已修**（M4.0②，`85c10b2`） |
-| (72) | 两通道 `done.usage` **两口径**（POST=本 run／GET=after_seq 之后回放到的所有 llm_result） | **升** | **移位 M5.4 前**（M4.2 收口拍板 5）："指标口径撞上"经实装复核不成立——/metrics 用量来自账本不来自帧；真消费方是 demo 面，修=译表按 run_id 分段清零 |
+| (72) | 两通道 `done.usage` **两口径**（POST=本 run／GET=after_seq 之后回放到的所有 llm_result） | **升** | **✅ M5.4 已修（2026-08-04）**：`stream._translate` 按 `EventRecord.run_id` 分段清零 usage 计数（SELECT 加列），GET 通道 done.usage 从"累计"改为"该 run"与 POST 同口径；见证测试 `test_done_usage_is_per_run_not_cumulative`（第二 run done.usage=={20,7} 非累计）钉死 |
 | (73) | **`_translate` 不译 `user_message`** → 重放得到半边对话，且因 `resubscribe(true)` 先清面板，**在验收幕 D 标准路径上就会现形** | **升** | **✅ 已修（M4.3③，`ac09505`）**：stream 译表加 user_message 帧（带 seq 参与续传）+ChatFrame 词汇表扩条+chat.html 蓝气泡重建；**POST 侧刻意不发**（用户消息本地已有）——差集从"无人知道"升级为双 docstring 声明 |
 | (74) | stream 首批回放**无上限**（`.all()` 全量）vs `events_view._MAX_EVENTS=1000` | **升** | **✅ 已修**（M4.2③，`5a17bf8`）：`_REPLAY_BATCH=500` **分批≠截断**（全量重放语义保持：批满续扫、终止判据与 message_reset 等排空——跨批终止不早退）；events_view 的截断是调试面语义，两种写法自此都是裁决过的 |
 | (75) | **帧协议没有"消息边界"概念、`done` 在兼职** → 直答类不发 done，重放时多条直答连成一个气泡 | 边界 | v1 演示页可接受；真正的修法是引入 message_start/message_end 帧对=协议升级，归 v2 |
 | (76) | **十注入参组合空间只验证两个角**，中间组合静默降级两实例 | **升** | **✅ M4.7 已修**（与 ⑤ 合并）：注入 runtime 不给 chat_service→`lock=None`；注入 runtime 不给 msg_redis→无 msgbuf（缺省赋值在 `if runtime is None` 分支内） |
-| (77) | **真实断线不自动换轨**（`send()` catch 只留一行警告，只有演示按钮 `simulateDrop` 会 resubscribe） | **升** | **移位 M5.4**（M4.2 收口拍板 5）：演示打磨面（chat.html 客户端），与指标无关 |
+| (77) | **真实断线不自动换轨**（`send()` catch 只留一行警告，只有演示按钮 `simulateDrop` 会 resubscribe） | **升** | **✅ M5.4 已修（2026-08-04）**：chat.html POST 发送 catch 改为自动 `resubscribe(true)` 换轨 GET 通道（与演示按钮同路径）——真实断线用户侧不再停在警告一行 |
 
 **M4.7 档收束（2026-08-03，六笔提交；上表 "✅ M4.7 已修" 的哈希映射）**：
 `4a06503`=A（(67)(68) notifier 心跳+断连唤醒）／`72d4eb0`=B（①②③⑦⑬⑳㉔㊶——目录缓存身份键+副本、REVOKE 迁移 `e5a1c7d94f02`、ttl_for、壳白名单、CJK 单点、解析入保护区、config 快照证人）／`ac872cc`=C（㉙(54)㊳㊵㊸㊹㊻㊼㊽(60)(66)⑤(76)㊱(55)——回放租户过滤、tickets 台账去重、装配拦截、直答锁段、兜底零承诺、tools 轮审计、a+ 续租、注入组合声明、读侧前提声明）／`a20033e`+`0f86b23`=D（#9 迁入+④ 纯文档）／`7a0392d`=E（#26#31 容器化+(57) 实测半边+#48 Linux 复验）／`9aff73e`=F 前置（㉝ LoopBoundGuard 共性防线【redis/http 取警告档=偏差登记，观察一个里程碑再议升级】+(64) 装配对应显式声明【机制钉子不做，声明+已知差异清单落 docstring】）。
