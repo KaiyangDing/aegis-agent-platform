@@ -1,0 +1,24 @@
+== P4 优雅停机验证（M5.5 顺手验，2026-08-04；配置件 M4.7-E 已落、本次为行为验证）==
+
+配置面（deploy/docker-compose.yml + Dockerfile CMD）：
+  uvicorn --timeout-graceful-shutdown 10（SIGTERM 后在途请求最多再跑 10s）
+  stop_grace_period: 15s（compose 给 SIGTERM→SIGKILL 的宽限，> 上者=先礼后兵有序嵌套）
+
+方法（可复跑）：
+  1) 经 nginx 发起真实 chat SSE 流（tenant-a/u-a1）；
+  2) 首帧到达即 `docker compose -f deploy/docker-compose.yml stop api`（三副本 SIGTERM）；
+  3) 观察流收尾形态与 `docker inspect .State.ExitCode`；
+  4) `up -d --scale api=3` 复原，healthz 核验。
+
+结果：
+  SIGTERM 发出于流 t+3.8s（首帧后、答案未完）；流于 t+5.8s **带 done 帧完整收尾**
+  ——在途请求在 graceful 窗（10s）内自然跑完，未被掐断；
+  三副本退出码 **全部 0**（优雅路径）；复原后 healthz=200。
+
+对照（crash-only 路径，同场素材=demo 高光2 / M4.7 kill9 实录）：
+  `docker kill` 退出码 137、在途流断连——事实面由事件溯源+租约恢复兜底（M5.4 实录）。
+  两条路径合起来即 C35 立场的完整拼图：优雅停机是礼貌，crash-only 是底线；
+  平台不靠优雅停机保正确性（正确性在 write-ahead 事实源），优雅停机只优化断连体验。
+
+口径：单次实测非统计样本；在途流答案长度 ~2s 短于 graceful 窗，更长答案会在窗尽头被断
+（届时行为回到 crash-only 兜底路径，正确性不变）——限定语随结论走。
