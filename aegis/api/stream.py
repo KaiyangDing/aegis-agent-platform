@@ -57,6 +57,13 @@ def _translate(rows: Sequence[Any], state: dict[str, Any]) -> list[ChatFrame]:
     frames: list[ChatFrame] = []
     for row in rows:
         etype, payload, seq = row.type, row.payload, row.seq
+        # M5.4 (72)：usage 按 run 分段清零——旧形态跨 run 累计，使 GET 的 done.usage
+        # 语义=「after_seq 之后回放到的所有 run 合计」，与 POST 的「本 run 实测」两口径
+        # 静默分岔（after_seq=0 时是整条会话合计）。按 run_id 分段后两通道同口径。
+        if row.run_id != state.get("run_id"):
+            state["run_id"] = row.run_id
+            state["prompt_tokens"] = 0
+            state["completion_tokens"] = 0
         if etype == EventType.USER_MESSAGE.value:
             frames.append(ChatFrame("user_message", {"text": str(payload["content"])}, seq=seq))
         elif etype == EventType.ASSISTANT_MESSAGE.value:
@@ -140,7 +147,7 @@ async def stream_session(
             async with factory() as s:
                 rows = (
                     await s.execute(
-                        select(EventRecord.seq, EventRecord.type, EventRecord.payload)
+                        select(EventRecord.seq, EventRecord.type, EventRecord.payload, EventRecord.run_id)
                         .where(EventRecord.session_id == session_id, EventRecord.seq > cursor)
                         .order_by(EventRecord.seq)
                         .limit(_REPLAY_BATCH)

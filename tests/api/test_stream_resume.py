@@ -267,3 +267,37 @@ async def test_replay_batching_drains_backlog_before_close(db_session_factory, m
     ids = [ln.split(":", 1)[1].strip() for ln in resp.text.splitlines() if ln.startswith("id:")]
     # 5 事件跨三批（2+2+1）：(73) 修复后 user_message 也译——五帧 seq 1–5 一条不少且有序
     assert ids == ["1", "2", "3", "4", "5"]
+
+
+# ---- M5.4 增量：观察池 (72)（done.usage 按 run 分段清零） ----
+
+
+async def test_done_usage_is_per_run_not_cumulative(db_session_factory) -> None:
+    """M5.4 (72)：GET 回放跨 run 时，每个 done.usage 只含**本 run** 的 llm_result 累计——
+    旧形态跨 run 累计使 GET 语义=「after_seq 之后所有 run 合计」，与 POST 的
+    「本 run 实测」两口径静默分岔（after_seq=0 时是整条会话合计）。"""
+    tid, sid = f"t-st-{uuid4().hex[:8]}", f"st-{uuid4().hex[:8]}"
+    async with db_session_factory() as s:
+        async with s.begin():
+            s.add(SessionRecord(id=sid, tenant_id=tid, user_id="u-st1"))
+    for run_id, p_tok, c_tok, answer in (("run-a", 10, 5, "第一答"), ("run-b", 20, 7, "第二答")):
+        writer = await EventWriter.open(db_session_factory, sid, run_id)
+        await writer.append(EventType.USER_MESSAGE, {"content": "问"})
+        await writer.append(EventType.LLM_CALL, {"iteration": 1, "tier": "standard", "input_tokens_est": 1})
+        await writer.append(
+            EventType.LLM_RESULT,
+            {
+                "iteration": 1,
+                "status": "ok",
+                "text": answer,
+                "usage": {"prompt_tokens": p_tok, "completion_tokens": c_tok},
+            },
+        )
+        await writer.append(EventType.ASSISTANT_MESSAGE, {"content": answer})
+        await writer.append(EventType.LOOP_TERMINATED, {"reason": "completed"})
+    async with _client(_make_app(db_session_factory)) as c:
+        resp = await c.get(f"/v1/sessions/{sid}/stream", headers=_bearer(tid, "u-st1"))
+    dones = [payload for kind, payload, _seq in _frames(resp.text) if kind == "done"]
+    assert len(dones) == 2
+    assert dones[0]["usage"] == {"prompt_tokens": 10, "completion_tokens": 5}
+    assert dones[1]["usage"] == {"prompt_tokens": 20, "completion_tokens": 7}  # 非 30/12

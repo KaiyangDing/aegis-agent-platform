@@ -159,7 +159,12 @@ async function send() {
       resubscribe(true);
     }
   } catch (e) {
-    if (!postCtl.signal.aborted) sys("⚠️ POST 流异常：" + e);
+    if (!postCtl.signal.aborted) {
+      // M5.4 (77)：真实断线自动换轨——服务端"断连不取消生产者"早就为重连备好了一切，
+      // 此前只有演示按钮会 resubscribe，真断线却停在一行警告（客户端未兑现的那一半）
+      sys("⚠️ POST 流异常：" + e + "——自动换轨到重订阅通道续收");
+      resubscribe(true);
+    }
   } finally {
     setChan(""); $("sendBtn").disabled = false;
   }
