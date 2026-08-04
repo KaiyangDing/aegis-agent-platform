@@ -93,3 +93,15 @@ def test_entry_classifier_and_owned_values_seams() -> None:
     assert build_agent_spec(_tenant({"tools": []})).owned_values == ()
     spec = build_agent_spec(_tenant({"tools": []}), owned_values=["138-0000-0000"])
     assert spec.owned_values == ("138-0000-0000",)
+
+
+# ---- M4.7 增量：观察池 ㊶（config 快照隔离证人） ----
+
+
+def test_spec_tenant_config_is_a_snapshot_not_the_row_dict() -> None:
+    """M4.7 ㊶：build_agent_spec 的 dict(tenant.config) 一层拷贝此前无 CI 证人——
+    退化成直引用（去掉 dict()）时 spec 与租户行共享同一 dict，运行期改动互相污染。"""
+    tenant = _tenant({"tools": ["order_query"], "faq": "digest"})
+    spec = build_agent_spec(tenant)
+    assert spec.tenant_config == tenant.config
+    assert spec.tenant_config is not tenant.config

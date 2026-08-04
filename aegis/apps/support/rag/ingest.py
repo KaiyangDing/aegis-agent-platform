@@ -7,7 +7,7 @@ split_text 是纯函数：无 IO 无状态，参数即策略——切块策略�
 00 §7.2 点名的面试考点，取舍全部写在 docstring。
 """
 
-from aegis.core.tokens import estimate_tokens
+from aegis.core.tokens import CJK_FIRST, CJK_LAST, estimate_tokens
 
 INGEST_TASK_NAME = "aegis.ingest_document"
 """Celery 任务名（wire 契约）：改名=断掉 api→worker 的投递，两端必须同步——
@@ -119,7 +119,7 @@ def _hard_split(sent: str, target_tokens: int) -> list[str]:
     cost = 0.0
     for ch in sent:
         buf.append(ch)
-        cost += 1.0 if "\u4e00" <= ch <= "\u9fff" else 0.25
+        cost += 1.0 if CJK_FIRST <= ch <= CJK_LAST else 0.25
         if cost >= target_tokens:
             parts.append("".join(buf))
             buf, cost = [], 0.0

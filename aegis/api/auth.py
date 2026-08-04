@@ -80,6 +80,15 @@ def issue_token(
     return jwt.encode(claims, secret, algorithm=_ALGORITHM)
 
 
+def ttl_for(role: Role, settings: Settings) -> int:
+    """按角色取 token 时长单点（M4.7 ⑦）：USER 短窗 / OPERATOR·ADMIN 员工窗。
+
+    此前唯一实现是 mint_token.py 的三元表达式且零测试——写反=终端用户暴露窗
+    放大 4 倍而无任何红灯；抽成单点后由测试钉方向，签发面一律走这里。
+    """
+    return settings.jwt_user_ttl_s if role is Role.USER else settings.jwt_staff_ttl_s
+
+
 def _principal_from_claims(claims: dict[str, Any]) -> Principal:
     try:
         sub, tid, role_raw = claims["sub"], claims["tid"], claims["role"]

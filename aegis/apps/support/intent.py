@@ -99,6 +99,10 @@ async def classify(
             async for chunk in stream:
                 if isinstance(chunk, TextDelta):
                     parts.append(chunk.text)
+        # M4.7 ㉔：解析也在保护区内——docstring 承诺"解析 bug 也不该杀请求"此前
+        # 全靠 _parse_intent 恰好是全函数（未声明未测试的隐式前提），现在是结构保证
+        # （对照组=guardrails 把解析放在被保护区内，同款哲学）
+        return _parse_intent("".join(parts))
     except Exception as e:  # C34 fail-open：分诊挂 → 主 Agent 标准档（D8）
         logger.warning(
             "意图分类失败，fail-open 走主 Agent：session=%s error=%s: %s",
@@ -107,7 +111,6 @@ async def classify(
             e,
         )
         return Intent.AGENT
-    return _parse_intent("".join(parts))
 
 
 async def answer_faq(

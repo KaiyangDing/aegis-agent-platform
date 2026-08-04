@@ -9,7 +9,7 @@
 import asyncio
 import sys
 
-from aegis.api.auth import issue_token
+from aegis.api.auth import issue_token, ttl_for
 from aegis.core.config import get_settings
 from aegis.core.db import get_owner_session_factory  # 维护面（D4）：发凭证发生在任何租户上下文之前
 from aegis.core.tenancy import Role, TenantDirectory
@@ -21,7 +21,7 @@ async def main(user_id: str) -> None:
     if user is None:
         raise SystemExit(f"用户 {user_id} 不存在——先跑 uv run python scripts/seed_demo.py")
     role = Role(user.role)
-    ttl_s = settings.jwt_user_ttl_s if role is Role.USER else settings.jwt_staff_ttl_s
+    ttl_s = ttl_for(role, settings)  # 单点（M4.7 ⑦）：方向由 tests/api/test_auth.py 钉死
     token = issue_token(
         user_id=user.id,
         tenant_id=user.tenant_id,

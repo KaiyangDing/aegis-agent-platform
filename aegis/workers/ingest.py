@@ -29,6 +29,7 @@ from aegis.core.config import get_settings
 from aegis.core.tenancy import SessionFactory
 from aegis.core.tenant_ctx import install_tenant_guard, tenant_context
 from aegis.gateway.embeddings import EMBED_BATCH_SIZE
+from aegis.gateway.errors import AuthError, BadRequestError
 from aegis.gateway.factory import build_embedding_client
 from aegis.gateway.providers.base import sanitize_error_text
 from aegis.workers.celery_app import celery_app
@@ -182,6 +183,16 @@ def ingest_document(self, document_id: str, tenant_id: str) -> dict[str, object]
     """薄同步壳：asyncio.run + 指数退避重试 + 终局。参数只有两个 id——原文在库（偏差(23)）。"""
     try:
         report = asyncio.run(_ingest_fresh(document_id, tenant_id))
+    except (AuthError, BadRequestError) as exc:
+        # M4.7 ⑬：确定性错误重试必然同败——EmbeddingClient 内层白名单已裁定它们
+        # 不可重试，壳的无差别 except 会抵消该裁定（AuthError 被重试 5 轮×内层
+        # 重试=最多十几次注定失败的真实调用）。直接终局 FAILED，死因落列。
+        error_text = sanitize_error_text(f"{type(exc).__name__}: {exc}")
+        try:
+            asyncio.run(_mark_failed_fresh(document_id, tenant_id, error_text))
+        except Exception:
+            logger.exception("FAILED 终局落库失败（死因照抛）：document=%s", document_id)
+        raise
     except Exception as exc:
         if self.request.retries >= self.max_retries:
             error_text = sanitize_error_text(f"{type(exc).__name__}: {exc}")

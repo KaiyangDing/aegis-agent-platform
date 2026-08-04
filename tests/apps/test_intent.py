@@ -200,3 +200,18 @@ async def test_parse_failure_leaves_audit_trail(caplog) -> None:
     line = next(r.message for r in caplog.records if "意图解析不可靠" in r.message)
     assert "hits=2" in line and "len=" in line
     assert "faq或rag" not in line  # 模型原文不落日志
+
+
+# ---- M4.7 增量：观察池 ㉔（解析在保护区内=结构保证） ----
+
+
+async def test_parse_failure_is_inside_fail_open(monkeypatch) -> None:
+    """M4.7 ㉔：解析器自身崩溃也走 fail-open→AGENT——docstring"解析 bug 也不该杀请求"
+    此前全靠 _parse_intent 恰好是全函数这个未声明前提；挪进 try 后本测试钉成结构保证。"""
+
+    def _boom(raw: str) -> Intent:
+        raise RuntimeError("parser bug")
+
+    monkeypatch.setattr("aegis.apps.support.intent._parse_intent", _boom)
+    gw = _text_gateway("faq")
+    assert await classify(gw, "你们几点营业", tenant_id="t-a", session_id="s-1") is Intent.AGENT

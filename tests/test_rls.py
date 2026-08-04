@@ -784,3 +784,15 @@ async def test_eval_cases_rls_policy_in_place(owner_engine) -> None:
             )
         ).scalar_one()
     assert n == 1
+
+
+# ---- M4.7 增量：观察池 ③（迁移簿记表不在应用角色权限面） ----
+
+
+async def test_alembic_version_revoked_from_app_role(rls_engine) -> None:
+    """M4.7 ③：M3.3 的 GRANT ON ALL TABLES 曾把 alembic_version 一并授给 aegis_app，
+    且该表无租户列不在 RLS 名单——低权角色可读可改迁移水位（基础设施完整性面）。
+    e5a1c7d94f02 全额回收后：SELECT 也 42501（应用运行时没有任何路径需要碰它）。"""
+    async with rls_engine.connect() as conn:
+        with pytest.raises(ProgrammingError):
+            await conn.execute(text("SELECT version_num FROM alembic_version"))

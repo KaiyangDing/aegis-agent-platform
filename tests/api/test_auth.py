@@ -23,6 +23,7 @@ from aegis.api.auth import (
     decode_token,
     issue_token,
     require_roles,
+    ttl_for,
 )
 from aegis.api.main import create_app
 from aegis.core.config import Settings
@@ -191,3 +192,15 @@ async def test_authed_request_sets_tenant_context(client) -> None:
     resp = await client.get("/ctx", headers=_bearer(_token(Role.USER, uid="u-a1")))
     assert resp.status_code == 200
     assert resp.json() == {"ctx_tenant": "tenant-a"}
+
+
+# ---- M4.7 增量：观察池 ⑦（TTL 单点方向钉死） ----
+
+
+def test_ttl_for_role_direction() -> None:
+    """M4.7 ⑦：USER 走短窗、OPERATOR/ADMIN 走员工窗——此前唯一实现是 mint_token
+    的三元表达式且零测试，写反=终端用户暴露窗放大 4 倍而无任何红灯。"""
+    settings = Settings(jwt_user_ttl_s=111, jwt_staff_ttl_s=222)
+    assert ttl_for(Role.USER, settings) == 111
+    assert ttl_for(Role.OPERATOR, settings) == 222
+    assert ttl_for(Role.ADMIN, settings) == 222

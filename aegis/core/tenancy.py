@@ -8,6 +8,7 @@ TenantDirectory 是只读目录：写路径只有种子脚本（#21 治理口径
 
 from __future__ import annotations
 
+import copy
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aegis.core.db import Base
+from aegis.core.tenant_ctx import current_tenant_id
 
 SessionFactory = Callable[[], AsyncSession]
 """按形状声明（与 runtime/store.py 同名同形状的本层副本）：core 不得向上 import
@@ -65,6 +67,32 @@ class UserRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+def _copy_tenant(row: TenantRecord) -> TenantRecord:
+    """脱缓存副本（M4.7 ②）：缓存里的 detached 实例被认证/预算/装配三消费方共享，
+    谁就地改 config（可变 JSONB dict）谁就污染全进程 60s；config 走 deepcopy——
+    内层还有 tools 列表，一层浅拷挡不住 append 污染。副本是 transient 对象，
+    绝不 session.add（目录是只读面，#21）。"""
+    return TenantRecord(
+        id=row.id,
+        name=row.name,
+        config=copy.deepcopy(row.config),
+        token_budget_monthly=row.token_budget_monthly,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _copy_user(row: UserRecord) -> UserRecord:
+    """同上（M4.7 ②）：users 行无可变容器列，逐字段构造即隔离。"""
+    return UserRecord(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        role=row.role,
+        display_name=row.display_name,
+        created_at=row.created_at,
+    )
+
+
 class TenantDirectory:
     """只读目录：认证/预算/装配三消费方共用；命中缓存 TTL 内不回库（#22）。
 
@@ -83,28 +111,41 @@ class TenantDirectory:
         self._factory = factory
         self._ttl = cache_ttl_s
         self._clock = clock
-        self._tenants: dict[str, tuple[float, TenantRecord]] = {}  # id -> (过期时刻, 行)
-        self._users: dict[str, tuple[float, UserRecord]] = {}
+        # M4.7 ①：键含环境身份维度——RLS 让"能读到什么"取决于身份，缓存命中即跳过
+        # 回库=跳过 RLS 复核；键不含身份，身份 A 灌进的行会服务身份 B 的命中（users
+        # 面当前不可达，一旦为"即时降权"接上 get_user 立刻是越权面）。键含身份后，
+        # 每个身份只命中自己灌的行，miss 回库时 RLS 仍在场——缓存是"RLS 结论的
+        # 备忘录"而非旁路。owner/无身份态键为 ""（维护面自成一格，不与租户混流）。
+        self._tenants: dict[tuple[str, str], tuple[float, TenantRecord]] = {}  # (身份, id) -> (过期时刻, 行)
+        self._users: dict[tuple[str, str], tuple[float, UserRecord]] = {}
+
+    @staticmethod
+    def _identity() -> str:
+        return current_tenant_id.get() or ""
 
     async def get_tenant(self, tenant_id: str) -> TenantRecord | None:
-        cached = self._tenants.get(tenant_id)
+        key = (self._identity(), tenant_id)
+        cached = self._tenants.get(key)
         if cached is not None and self._clock() < cached[0]:
-            return cached[1]
+            return _copy_tenant(cached[1])
         async with self._factory() as s:
             row = (await s.execute(select(TenantRecord).where(TenantRecord.id == tenant_id))).scalar_one_or_none()
-        if row is not None:
-            self._tenants[tenant_id] = (self._clock() + self._ttl, row)
-        return row
+        if row is None:
+            return None
+        self._tenants[key] = (self._clock() + self._ttl, row)
+        return _copy_tenant(row)
 
     async def get_user(self, user_id: str) -> UserRecord | None:
-        cached = self._users.get(user_id)
+        key = (self._identity(), user_id)
+        cached = self._users.get(key)
         if cached is not None and self._clock() < cached[0]:
-            return cached[1]
+            return _copy_user(cached[1])
         async with self._factory() as s:
             row = (await s.execute(select(UserRecord).where(UserRecord.id == user_id))).scalar_one_or_none()
-        if row is not None:
-            self._users[user_id] = (self._clock() + self._ttl, row)
-        return row
+        if row is None:
+            return None
+        self._users[key] = (self._clock() + self._ttl, row)
+        return _copy_user(row)
 
     async def monthly_budget(self, tenant_id: str) -> int:
         """未知租户返回 0（=闸门关闭）——与 Settings.tenant_monthly_token_budget

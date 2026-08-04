@@ -16,12 +16,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from aegis.core.tokens import CJK_RANGE
+
 # 权重定成模块常量不进 Settings：这是检索质量参数不是运维参数，调它=改算法
 # 要走实测校准（交付④），不该被环境变量随手拧
 _SIMILARITY_WEIGHT = 0.7
 _COVERAGE_WEIGHT = 0.3
 
-_CJK_RE = re.compile(r"[\u4e00-\u9fff]+")  # 范围镜像 tokens.py:15——同一把尺
+_CJK_RE = re.compile(f"[{CJK_RANGE}]+")  # 区间单点 core.tokens（M4.7 ⑳）——同一把尺不再靠注释镜像
 _WORD_RE = re.compile(r"[0-9A-Za-z]+")  # 非 CJK 单元：字母数字段（型号/单号天然成段）
 
 

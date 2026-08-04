@@ -158,3 +158,32 @@ async def test_mark_failed_writes_terminal_state(db_session_factory) -> None:
     doc = await _doc(db_session_factory, "d-ing-dead")
     assert doc.status == IngestStatus.FAILED.value
     assert doc.error == "RuntimeError: 注入的一批失败"
+
+
+# ---- M4.7 增量：观察池 ⑬（确定性错误不过壳的无差别重试） ----
+
+
+def test_shell_deterministic_error_skips_retry_and_marks_failed(monkeypatch) -> None:
+    """M4.7 ⑬：AuthError/BadRequestError 直接终局 FAILED——EmbeddingClient 内层白名单
+    已裁定它们不可重试，壳的无差别 except 会抵消该裁定（AuthError 被重试 5 轮=
+    最多十几次注定失败的真实调用）。判据=内胆恰跑一次+FAILED 落库恰一次。"""
+    from aegis.gateway.errors import AuthError
+    from aegis.workers import ingest as workers_ingest
+
+    calls = {"ingest": 0, "failed": 0}
+
+    async def fake_ingest(document_id: str, tenant_id: str):
+        calls["ingest"] += 1
+        raise AuthError("bailian", "api key 无效（确定性，重试必同败）")
+
+    async def fake_mark(document_id: str, tenant_id: str, error_text: str) -> None:
+        calls["failed"] += 1
+
+    monkeypatch.setattr(workers_ingest, "_ingest_fresh", fake_ingest)
+    monkeypatch.setattr(workers_ingest, "_mark_failed_fresh", fake_mark)
+    result = workers_ingest.ingest_document.apply(args=("d-det", "t-det"))
+    assert result.status == "FAILURE"
+    # 不断言异常类身份：celery eager 结果层重建异常按 str(exc) 单参重构，
+    # ProviderError 家族双参签名重构失败回退基类（探针实测得 GatewayError）——
+    # 行为契约在计数器上：内胆恰一次（零重试）+FAILED 终局恰一次
+    assert calls == {"ingest": 1, "failed": 1}
