@@ -48,6 +48,9 @@
 | `measure_intent_latency.py` | 意图分类延迟实测（四类探针+缓存命中重复问；首测新鲜 901–2357 ms/命中 8 ms/4-4 全中；M3.12 复测同口径。新前缀族 measure_=轻量延迟实测工种，M3.12 性能口径/M5.2 口径②扩展位） | M3.6② | **是**（<¥0.001，探针清单钉死上限） | PG/Redis + 种子 + `.env` key |
 | `perf_m3.py` | M3 性能两口径实测（00 §7.2 第 2 条）：缓存命中二连发 <50ms（3 组中位）/未命中首 token standard 档 20 样本 P50/P95 <2.5s；超设计值=修正记录不改口径；产出进 reports/m3_acceptance.md | M3.12② | **是**（≤26 调用 <¥0.05，上限 30/¥0.50 写死） | PG/Redis + 种子 + `.env` key |
 | `fallback_rate_m3.py` | 知识库外兜底触发率实测（00 §7.2 第 4 条）：分母=seed.jsonl okb 5 条（I1）、主 Agent 生产装配直驱+真实检索；判定=兜底信号集（record 脚本同源）∨ ticket_create；≥95%，未触发逐条归因全文 | M3.12② | **是**（≈5–10 调用 <¥0.02，上限 15/¥0.20 写死） | PG/Redis + 迁移 + 种子 + 语料已摄取 + `.env` key |
+| `cost_common.py` | **M4.6 成本实验共享底座（非可执行）**：exp-route/exp-cache 实验租户数据面常量（只读订单 EXPR-/EXPC-，P6）+ `evals/cost_questions.json` 装载 + `build_cache_traffic` 纯函数（固定种子可重放）——两实验脚本与 `tests/obs/test_cost_traffic.py` 的 I1 单一事实源；stdlib-only，被 importlib 装载 | M4.6① | 否 | 无 |
+| `experiment_cost_routing.py` | **M4.6 实验①档位路由降本**：80 条全唯一题 × 三组同题对照（A=全 strong / A'=全 standard / B=正常分诊），缓存关闭+预算闸关闭，组间精确 sid 清单分账（M4.4④ 对账正解），产物 `reports/m4_cost_routing.txt`；`--smoke`=每组 2 题连通冒烟 | M4.6② | **是**（上限 `cost_routing_token_budget`=600k 写死 config，超限中止落 partial） | PG/Redis + 迁移 + `.env` key |
+| `experiment_cost_cache.py` | **M4.6 实验②精确缓存降本**：140 唯一题经 `build_cache_traffic(0.3, seed=42)` 扩成 200 请求恰 60 复述，先关后开两相位 + FLUSH 冷启动 + **请求级全命中自检**（复述全命中/首现零误命中，对不上先修再报数），产物 `reports/m4_cost_cache.txt`；`--smoke`=8 请求 | M4.6③ | **是**（上限 `cost_cache_token_budget`=600k 写死 config） | PG/Redis + 迁移 + `.env` key |
 
 ## 对账与调试
 

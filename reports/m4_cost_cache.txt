@@ -1,0 +1,240 @@
+M4.6 实验②：精确缓存降本（执行 2026-08-03 23:27:29Z → 2026-08-03 23:47:36Z，run_tag=691dcd82）
+========================================================================
+1. 实验口径
+- 模拟流量：140 条唯一问题（cost_questions.json cache 节，与实验①/评测集零交集）
+  经 build_cache_traffic(replay_ratio=0.3, seed=42) 扩成 200 条请求、恰 60 条复述；
+  分布假设显式声明：30% 历史复述（从已流出前缀均匀重抽，逐字节同串）；
+  唯一池意图构成 FAQ 30%(42)/RAG 40%(56)/工具 20%(28)/闲聊 10%(14)，工具题只读；
+- 驱动：ChatService 生产编排进程内直驱（正常分诊路由），每请求一个新会话——
+  缓存 key 只哈希语义本体（tier/messages/tools/温度/上限），session_id 不入哈希，
+  跨会话复述照样命中（cache.py:38-42）；
+- 相位：先 C（缓存关）后 D（缓存开 TTL=3600，先 FLUSH 实验租户键冷启动）——
+  同流量同序两遍；控制变量装配后断言核验；故障注入 0；预算闸关闭；
+- 分账：相位间精确 sid 清单（附录），数字可由 usage_ledger 复算；预算 600000；
+- 检索 embedding 无缓存语义、两相位等价支出，不计入对照（tier<>'embedding'）。
+
+2. 原始数字（usage_ledger 聚合，tier<>'embedding'）
+- off: 请求 200/200，LLM 调用 424（cached 0），prompt 252999，completion 10246，cost ¥0.190707
+- on: 请求 200/200，LLM 调用 423（cached 121），prompt 249359，completion 10254，cost ¥0.148905
+- embedding 另账（setup 语料种子+两相位检索查询向量）：294 行，3346 token，¥0.001744
+
+3. 结果与命中率自检
+- 命中率自检：设计复述 60/200；相位 on 请求级全命中=复述 60/60、
+  首现误命中 0（应 0）、相位 off 全命中 0（应 0）；与设计吻合
+- 精确缓存降本（30% 复述假设下）：21.9%（C→D，同流量 200 条）
+- 限定语：数字只在「本流量构成 + 30% 复述假设 + 本价目表」口径下成立；
+  复述率是声明性假设——真实流量的降本随实际复述率单调变化，本实验不外推。
+
+4. 威胁与边界
+- 30% 复述是声明的分布假设不是线上实测（生成器与种子公开，构成可审计可重放）；
+- 价目为演示值（config.py model_prices）——降本%是同一价目表内的相对量；
+- 不预设目标值（04 M4）；精确缓存只对逐字节相同请求生效，措辞略异即 miss——
+  本数字是精确缓存的上界口径（语义缓存归 v2，00 §10.3）；
+- LLM 输出长度方差使 C 相位成本有自然波动；D 相位命中部分零方差。
+
+附录 A：聚合/自检 SQL（sids 取附录 B 对应相位清单）
+  SELECT count(*) AS calls, count(*) FILTER (WHERE cached) AS cached_calls, coalesce(sum(prompt_tokens), 0) AS p, coalesce(sum(completion_tokens), 0) AS c, coalesce(sum(cost), 0) AS cost FROM usage_ledger WHERE session_id = ANY(:sids) AND tier <> 'embedding'
+  SELECT session_id FROM usage_ledger WHERE session_id = ANY(:sids) AND tier <> 'embedding' GROUP BY session_id HAVING bool_and(cached)
+附录 B：各相位 sid 清单（精确分账面）
+[off] 200 条
+  cost-cache-off-000-691dcd82, cost-cache-off-001-691dcd82
+  cost-cache-off-002-691dcd82, cost-cache-off-003-691dcd82
+  cost-cache-off-004-691dcd82, cost-cache-off-005-691dcd82
+  cost-cache-off-006-691dcd82, cost-cache-off-007-691dcd82
+  cost-cache-off-008-691dcd82, cost-cache-off-009-691dcd82
+  cost-cache-off-010-691dcd82, cost-cache-off-011-691dcd82
+  cost-cache-off-012-691dcd82, cost-cache-off-013-691dcd82
+  cost-cache-off-014-691dcd82, cost-cache-off-015-691dcd82
+  cost-cache-off-016-691dcd82, cost-cache-off-017-691dcd82
+  cost-cache-off-018-691dcd82, cost-cache-off-019-691dcd82
+  cost-cache-off-020-691dcd82, cost-cache-off-021-691dcd82
+  cost-cache-off-022-691dcd82, cost-cache-off-023-691dcd82
+  cost-cache-off-024-691dcd82, cost-cache-off-025-691dcd82
+  cost-cache-off-026-691dcd82, cost-cache-off-027-691dcd82
+  cost-cache-off-028-691dcd82, cost-cache-off-029-691dcd82
+  cost-cache-off-030-691dcd82, cost-cache-off-031-691dcd82
+  cost-cache-off-032-691dcd82, cost-cache-off-033-691dcd82
+  cost-cache-off-034-691dcd82, cost-cache-off-035-691dcd82
+  cost-cache-off-036-691dcd82, cost-cache-off-037-691dcd82
+  cost-cache-off-038-691dcd82, cost-cache-off-039-691dcd82
+  cost-cache-off-040-691dcd82, cost-cache-off-041-691dcd82
+  cost-cache-off-042-691dcd82, cost-cache-off-043-691dcd82
+  cost-cache-off-044-691dcd82, cost-cache-off-045-691dcd82
+  cost-cache-off-046-691dcd82, cost-cache-off-047-691dcd82
+  cost-cache-off-048-691dcd82, cost-cache-off-049-691dcd82
+  cost-cache-off-050-691dcd82, cost-cache-off-051-691dcd82
+  cost-cache-off-052-691dcd82, cost-cache-off-053-691dcd82
+  cost-cache-off-054-691dcd82, cost-cache-off-055-691dcd82
+  cost-cache-off-056-691dcd82, cost-cache-off-057-691dcd82
+  cost-cache-off-058-691dcd82, cost-cache-off-059-691dcd82
+  cost-cache-off-060-691dcd82, cost-cache-off-061-691dcd82
+  cost-cache-off-062-691dcd82, cost-cache-off-063-691dcd82
+  cost-cache-off-064-691dcd82, cost-cache-off-065-691dcd82
+  cost-cache-off-066-691dcd82, cost-cache-off-067-691dcd82
+  cost-cache-off-068-691dcd82, cost-cache-off-069-691dcd82
+  cost-cache-off-070-691dcd82, cost-cache-off-071-691dcd82
+  cost-cache-off-072-691dcd82, cost-cache-off-073-691dcd82
+  cost-cache-off-074-691dcd82, cost-cache-off-075-691dcd82
+  cost-cache-off-076-691dcd82, cost-cache-off-077-691dcd82
+  cost-cache-off-078-691dcd82, cost-cache-off-079-691dcd82
+  cost-cache-off-080-691dcd82, cost-cache-off-081-691dcd82
+  cost-cache-off-082-691dcd82, cost-cache-off-083-691dcd82
+  cost-cache-off-084-691dcd82, cost-cache-off-085-691dcd82
+  cost-cache-off-086-691dcd82, cost-cache-off-087-691dcd82
+  cost-cache-off-088-691dcd82, cost-cache-off-089-691dcd82
+  cost-cache-off-090-691dcd82, cost-cache-off-091-691dcd82
+  cost-cache-off-092-691dcd82, cost-cache-off-093-691dcd82
+  cost-cache-off-094-691dcd82, cost-cache-off-095-691dcd82
+  cost-cache-off-096-691dcd82, cost-cache-off-097-691dcd82
+  cost-cache-off-098-691dcd82, cost-cache-off-099-691dcd82
+  cost-cache-off-100-691dcd82, cost-cache-off-101-691dcd82
+  cost-cache-off-102-691dcd82, cost-cache-off-103-691dcd82
+  cost-cache-off-104-691dcd82, cost-cache-off-105-691dcd82
+  cost-cache-off-106-691dcd82, cost-cache-off-107-691dcd82
+  cost-cache-off-108-691dcd82, cost-cache-off-109-691dcd82
+  cost-cache-off-110-691dcd82, cost-cache-off-111-691dcd82
+  cost-cache-off-112-691dcd82, cost-cache-off-113-691dcd82
+  cost-cache-off-114-691dcd82, cost-cache-off-115-691dcd82
+  cost-cache-off-116-691dcd82, cost-cache-off-117-691dcd82
+  cost-cache-off-118-691dcd82, cost-cache-off-119-691dcd82
+  cost-cache-off-120-691dcd82, cost-cache-off-121-691dcd82
+  cost-cache-off-122-691dcd82, cost-cache-off-123-691dcd82
+  cost-cache-off-124-691dcd82, cost-cache-off-125-691dcd82
+  cost-cache-off-126-691dcd82, cost-cache-off-127-691dcd82
+  cost-cache-off-128-691dcd82, cost-cache-off-129-691dcd82
+  cost-cache-off-130-691dcd82, cost-cache-off-131-691dcd82
+  cost-cache-off-132-691dcd82, cost-cache-off-133-691dcd82
+  cost-cache-off-134-691dcd82, cost-cache-off-135-691dcd82
+  cost-cache-off-136-691dcd82, cost-cache-off-137-691dcd82
+  cost-cache-off-138-691dcd82, cost-cache-off-139-691dcd82
+  cost-cache-off-140-691dcd82, cost-cache-off-141-691dcd82
+  cost-cache-off-142-691dcd82, cost-cache-off-143-691dcd82
+  cost-cache-off-144-691dcd82, cost-cache-off-145-691dcd82
+  cost-cache-off-146-691dcd82, cost-cache-off-147-691dcd82
+  cost-cache-off-148-691dcd82, cost-cache-off-149-691dcd82
+  cost-cache-off-150-691dcd82, cost-cache-off-151-691dcd82
+  cost-cache-off-152-691dcd82, cost-cache-off-153-691dcd82
+  cost-cache-off-154-691dcd82, cost-cache-off-155-691dcd82
+  cost-cache-off-156-691dcd82, cost-cache-off-157-691dcd82
+  cost-cache-off-158-691dcd82, cost-cache-off-159-691dcd82
+  cost-cache-off-160-691dcd82, cost-cache-off-161-691dcd82
+  cost-cache-off-162-691dcd82, cost-cache-off-163-691dcd82
+  cost-cache-off-164-691dcd82, cost-cache-off-165-691dcd82
+  cost-cache-off-166-691dcd82, cost-cache-off-167-691dcd82
+  cost-cache-off-168-691dcd82, cost-cache-off-169-691dcd82
+  cost-cache-off-170-691dcd82, cost-cache-off-171-691dcd82
+  cost-cache-off-172-691dcd82, cost-cache-off-173-691dcd82
+  cost-cache-off-174-691dcd82, cost-cache-off-175-691dcd82
+  cost-cache-off-176-691dcd82, cost-cache-off-177-691dcd82
+  cost-cache-off-178-691dcd82, cost-cache-off-179-691dcd82
+  cost-cache-off-180-691dcd82, cost-cache-off-181-691dcd82
+  cost-cache-off-182-691dcd82, cost-cache-off-183-691dcd82
+  cost-cache-off-184-691dcd82, cost-cache-off-185-691dcd82
+  cost-cache-off-186-691dcd82, cost-cache-off-187-691dcd82
+  cost-cache-off-188-691dcd82, cost-cache-off-189-691dcd82
+  cost-cache-off-190-691dcd82, cost-cache-off-191-691dcd82
+  cost-cache-off-192-691dcd82, cost-cache-off-193-691dcd82
+  cost-cache-off-194-691dcd82, cost-cache-off-195-691dcd82
+  cost-cache-off-196-691dcd82, cost-cache-off-197-691dcd82
+  cost-cache-off-198-691dcd82, cost-cache-off-199-691dcd82
+[on] 200 条
+  cost-cache-on-000-691dcd82, cost-cache-on-001-691dcd82
+  cost-cache-on-002-691dcd82, cost-cache-on-003-691dcd82
+  cost-cache-on-004-691dcd82, cost-cache-on-005-691dcd82
+  cost-cache-on-006-691dcd82, cost-cache-on-007-691dcd82
+  cost-cache-on-008-691dcd82, cost-cache-on-009-691dcd82
+  cost-cache-on-010-691dcd82, cost-cache-on-011-691dcd82
+  cost-cache-on-012-691dcd82, cost-cache-on-013-691dcd82
+  cost-cache-on-014-691dcd82, cost-cache-on-015-691dcd82
+  cost-cache-on-016-691dcd82, cost-cache-on-017-691dcd82
+  cost-cache-on-018-691dcd82, cost-cache-on-019-691dcd82
+  cost-cache-on-020-691dcd82, cost-cache-on-021-691dcd82
+  cost-cache-on-022-691dcd82, cost-cache-on-023-691dcd82
+  cost-cache-on-024-691dcd82, cost-cache-on-025-691dcd82
+  cost-cache-on-026-691dcd82, cost-cache-on-027-691dcd82
+  cost-cache-on-028-691dcd82, cost-cache-on-029-691dcd82
+  cost-cache-on-030-691dcd82, cost-cache-on-031-691dcd82
+  cost-cache-on-032-691dcd82, cost-cache-on-033-691dcd82
+  cost-cache-on-034-691dcd82, cost-cache-on-035-691dcd82
+  cost-cache-on-036-691dcd82, cost-cache-on-037-691dcd82
+  cost-cache-on-038-691dcd82, cost-cache-on-039-691dcd82
+  cost-cache-on-040-691dcd82, cost-cache-on-041-691dcd82
+  cost-cache-on-042-691dcd82, cost-cache-on-043-691dcd82
+  cost-cache-on-044-691dcd82, cost-cache-on-045-691dcd82
+  cost-cache-on-046-691dcd82, cost-cache-on-047-691dcd82
+  cost-cache-on-048-691dcd82, cost-cache-on-049-691dcd82
+  cost-cache-on-050-691dcd82, cost-cache-on-051-691dcd82
+  cost-cache-on-052-691dcd82, cost-cache-on-053-691dcd82
+  cost-cache-on-054-691dcd82, cost-cache-on-055-691dcd82
+  cost-cache-on-056-691dcd82, cost-cache-on-057-691dcd82
+  cost-cache-on-058-691dcd82, cost-cache-on-059-691dcd82
+  cost-cache-on-060-691dcd82, cost-cache-on-061-691dcd82
+  cost-cache-on-062-691dcd82, cost-cache-on-063-691dcd82
+  cost-cache-on-064-691dcd82, cost-cache-on-065-691dcd82
+  cost-cache-on-066-691dcd82, cost-cache-on-067-691dcd82
+  cost-cache-on-068-691dcd82, cost-cache-on-069-691dcd82
+  cost-cache-on-070-691dcd82, cost-cache-on-071-691dcd82
+  cost-cache-on-072-691dcd82, cost-cache-on-073-691dcd82
+  cost-cache-on-074-691dcd82, cost-cache-on-075-691dcd82
+  cost-cache-on-076-691dcd82, cost-cache-on-077-691dcd82
+  cost-cache-on-078-691dcd82, cost-cache-on-079-691dcd82
+  cost-cache-on-080-691dcd82, cost-cache-on-081-691dcd82
+  cost-cache-on-082-691dcd82, cost-cache-on-083-691dcd82
+  cost-cache-on-084-691dcd82, cost-cache-on-085-691dcd82
+  cost-cache-on-086-691dcd82, cost-cache-on-087-691dcd82
+  cost-cache-on-088-691dcd82, cost-cache-on-089-691dcd82
+  cost-cache-on-090-691dcd82, cost-cache-on-091-691dcd82
+  cost-cache-on-092-691dcd82, cost-cache-on-093-691dcd82
+  cost-cache-on-094-691dcd82, cost-cache-on-095-691dcd82
+  cost-cache-on-096-691dcd82, cost-cache-on-097-691dcd82
+  cost-cache-on-098-691dcd82, cost-cache-on-099-691dcd82
+  cost-cache-on-100-691dcd82, cost-cache-on-101-691dcd82
+  cost-cache-on-102-691dcd82, cost-cache-on-103-691dcd82
+  cost-cache-on-104-691dcd82, cost-cache-on-105-691dcd82
+  cost-cache-on-106-691dcd82, cost-cache-on-107-691dcd82
+  cost-cache-on-108-691dcd82, cost-cache-on-109-691dcd82
+  cost-cache-on-110-691dcd82, cost-cache-on-111-691dcd82
+  cost-cache-on-112-691dcd82, cost-cache-on-113-691dcd82
+  cost-cache-on-114-691dcd82, cost-cache-on-115-691dcd82
+  cost-cache-on-116-691dcd82, cost-cache-on-117-691dcd82
+  cost-cache-on-118-691dcd82, cost-cache-on-119-691dcd82
+  cost-cache-on-120-691dcd82, cost-cache-on-121-691dcd82
+  cost-cache-on-122-691dcd82, cost-cache-on-123-691dcd82
+  cost-cache-on-124-691dcd82, cost-cache-on-125-691dcd82
+  cost-cache-on-126-691dcd82, cost-cache-on-127-691dcd82
+  cost-cache-on-128-691dcd82, cost-cache-on-129-691dcd82
+  cost-cache-on-130-691dcd82, cost-cache-on-131-691dcd82
+  cost-cache-on-132-691dcd82, cost-cache-on-133-691dcd82
+  cost-cache-on-134-691dcd82, cost-cache-on-135-691dcd82
+  cost-cache-on-136-691dcd82, cost-cache-on-137-691dcd82
+  cost-cache-on-138-691dcd82, cost-cache-on-139-691dcd82
+  cost-cache-on-140-691dcd82, cost-cache-on-141-691dcd82
+  cost-cache-on-142-691dcd82, cost-cache-on-143-691dcd82
+  cost-cache-on-144-691dcd82, cost-cache-on-145-691dcd82
+  cost-cache-on-146-691dcd82, cost-cache-on-147-691dcd82
+  cost-cache-on-148-691dcd82, cost-cache-on-149-691dcd82
+  cost-cache-on-150-691dcd82, cost-cache-on-151-691dcd82
+  cost-cache-on-152-691dcd82, cost-cache-on-153-691dcd82
+  cost-cache-on-154-691dcd82, cost-cache-on-155-691dcd82
+  cost-cache-on-156-691dcd82, cost-cache-on-157-691dcd82
+  cost-cache-on-158-691dcd82, cost-cache-on-159-691dcd82
+  cost-cache-on-160-691dcd82, cost-cache-on-161-691dcd82
+  cost-cache-on-162-691dcd82, cost-cache-on-163-691dcd82
+  cost-cache-on-164-691dcd82, cost-cache-on-165-691dcd82
+  cost-cache-on-166-691dcd82, cost-cache-on-167-691dcd82
+  cost-cache-on-168-691dcd82, cost-cache-on-169-691dcd82
+  cost-cache-on-170-691dcd82, cost-cache-on-171-691dcd82
+  cost-cache-on-172-691dcd82, cost-cache-on-173-691dcd82
+  cost-cache-on-174-691dcd82, cost-cache-on-175-691dcd82
+  cost-cache-on-176-691dcd82, cost-cache-on-177-691dcd82
+  cost-cache-on-178-691dcd82, cost-cache-on-179-691dcd82
+  cost-cache-on-180-691dcd82, cost-cache-on-181-691dcd82
+  cost-cache-on-182-691dcd82, cost-cache-on-183-691dcd82
+  cost-cache-on-184-691dcd82, cost-cache-on-185-691dcd82
+  cost-cache-on-186-691dcd82, cost-cache-on-187-691dcd82
+  cost-cache-on-188-691dcd82, cost-cache-on-189-691dcd82
+  cost-cache-on-190-691dcd82, cost-cache-on-191-691dcd82
+  cost-cache-on-192-691dcd82, cost-cache-on-193-691dcd82
+  cost-cache-on-194-691dcd82, cost-cache-on-195-691dcd82
+  cost-cache-on-196-691dcd82, cost-cache-on-197-691dcd82
+  cost-cache-on-198-691dcd82, cost-cache-on-199-691dcd82

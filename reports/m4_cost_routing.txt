@@ -1,0 +1,169 @@
+M4.6 实验①：档位路由降本（执行 2026-08-03 23:23:07Z → 2026-08-03 23:36:14Z，run_tag=ba422fce）
+========================================================================
+1. 实验口径
+- 问题集：evals/cost_questions.json routing 节，80 条全唯一（不受重复率污染，
+  节内/节间/与评测集零交集由 tests/obs/test_cost_traffic.py 钉死）；
+  意图分布为声明性假设：FAQ 30%(24)/RAG 40%(32)/工具 20%(16)/闲聊 10%(8)，
+  贴近客服流量构成；工具题只读（order_query/logistics_query），写路径不在实验面；
+- 控制变量：精确缓存关闭（CACHE_TTL_SECONDS=0，装配后断言核验）；故障注入 0；
+  实验租户 exp-route 月度预算闸关闭（token_budget_monthly=0）；数据面=tenant-a 镜像
+  （同名/同 faq digest/语料同源 data/corpus/tenant-a/只读订单 EXPR-1001..1008）；
+- 组别定义（三组同题同序，每题一个新会话，进程内直驱与生产同栈层）：
+    A=基线1：全部强制 strong 档（不做分档的保守实现，无意图层直进主 Agent）
+    A'=基线2：全部强制 standard 档（不做分档的朴素实现，驱动形态同 A）
+    B=实验组：正常分诊路由（fast 分类 + FAQ 直答 fast + 主 Agent standard）
+- 分账：组间精确 sid 清单（见附录），全部数字可由 usage_ledger 复算；
+  检索查询向量与语料种子的 embedding 行不计入对照数字，另账单列；
+- 预算：cost_routing_token_budget=600000（超限中止落 partial）。
+
+2. 原始数字（usage_ledger 聚合，tier<>'embedding'）
+- strong: 题数 80/80，LLM 调用 96，prompt 132317，completion 3836，cost ¥0.354385
+    strong/qwen3.7-max: 调用 96，prompt 132317，completion 3836，cost ¥0.354385
+- standard: 题数 80/80，LLM 调用 96，prompt 126307，completion 4803，cost ¥0.110648
+    standard/qwen-plus: 调用 96，prompt 126307，completion 4803，cost ¥0.110648
+- tiered: 题数 80/80，LLM 调用 173，prompt 116201，completion 4479，cost ¥0.089712
+    fast/qwen-flash: 调用 105，prompt 18296，completion 643，cost ¥0.003716
+    standard/qwen-plus: 调用 68，prompt 97905，completion 3836，cost ¥0.085996
+- embedding 另账（setup 语料种子+三组检索查询向量）：260 行，2894 token，¥0.001499
+
+3. 结果
+- 档位路由降本 vs-strong  ：74.7%（A→B，同题 80 条）
+- 档位路由降本 vs-standard：18.9%（A'→B，同题 80 条）
+- 限定语：数字只在「本问题集构成 + 本价目表 + 缓存关闭」口径下成立；
+  B 组成本已诚实计入 fast 分诊调用与检索开销外的全部 LLM 花费。
+
+4. 威胁与边界
+- 意图分布是声明性假设不是线上实测；换分布数字会变（报告与集合构成一起公开即可审计）；
+- 价目为演示值（config.py model_prices，非百炼实价）——降本%是同一价目表内的相对量；
+- 不预设目标值（04 M4：可被集合构成操纵的预设已删除）；
+- A/A' 无意图层，FAQ/闲聊类题也走完整主 Agent（含检索注入）——这正是「不做分档」
+  反事实的真实代价；B 组 HANDOFF 误分诊会零 LLM 短路（如有，errored/分布行可见）；
+- LLM 输出长度天然有方差：同题重跑降本%会小幅波动，量级结论不受影响。
+
+附录 A：聚合 SQL（sids 取附录 B 对应组清单）
+  SELECT count(*) AS calls, count(*) FILTER (WHERE cached) AS cached_calls, coalesce(sum(prompt_tokens), 0) AS p, coalesce(sum(completion_tokens), 0) AS c, coalesce(sum(cost), 0) AS cost FROM usage_ledger WHERE session_id = ANY(:sids) AND tier <> 'embedding'
+  SELECT tier, model, count(*) AS calls, coalesce(sum(prompt_tokens), 0) AS p, coalesce(sum(completion_tokens), 0) AS c, coalesce(sum(cost), 0) AS cost FROM usage_ledger WHERE session_id = ANY(:sids) AND tier <> 'embedding' GROUP BY tier, model ORDER BY tier, model
+附录 B：各组 sid 清单（精确分账面）
+[strong] 80 条
+  cost-route-strong-cr-f01-ba422fce, cost-route-strong-cr-f02-ba422fce
+  cost-route-strong-cr-f03-ba422fce, cost-route-strong-cr-f04-ba422fce
+  cost-route-strong-cr-f05-ba422fce, cost-route-strong-cr-f06-ba422fce
+  cost-route-strong-cr-f07-ba422fce, cost-route-strong-cr-f08-ba422fce
+  cost-route-strong-cr-f09-ba422fce, cost-route-strong-cr-f10-ba422fce
+  cost-route-strong-cr-f11-ba422fce, cost-route-strong-cr-f12-ba422fce
+  cost-route-strong-cr-f13-ba422fce, cost-route-strong-cr-f14-ba422fce
+  cost-route-strong-cr-f15-ba422fce, cost-route-strong-cr-f16-ba422fce
+  cost-route-strong-cr-f17-ba422fce, cost-route-strong-cr-f18-ba422fce
+  cost-route-strong-cr-f19-ba422fce, cost-route-strong-cr-f20-ba422fce
+  cost-route-strong-cr-f21-ba422fce, cost-route-strong-cr-f22-ba422fce
+  cost-route-strong-cr-f23-ba422fce, cost-route-strong-cr-f24-ba422fce
+  cost-route-strong-cr-r01-ba422fce, cost-route-strong-cr-r02-ba422fce
+  cost-route-strong-cr-r03-ba422fce, cost-route-strong-cr-r04-ba422fce
+  cost-route-strong-cr-r05-ba422fce, cost-route-strong-cr-r06-ba422fce
+  cost-route-strong-cr-r07-ba422fce, cost-route-strong-cr-r08-ba422fce
+  cost-route-strong-cr-r09-ba422fce, cost-route-strong-cr-r10-ba422fce
+  cost-route-strong-cr-r11-ba422fce, cost-route-strong-cr-r12-ba422fce
+  cost-route-strong-cr-r13-ba422fce, cost-route-strong-cr-r14-ba422fce
+  cost-route-strong-cr-r15-ba422fce, cost-route-strong-cr-r16-ba422fce
+  cost-route-strong-cr-r17-ba422fce, cost-route-strong-cr-r18-ba422fce
+  cost-route-strong-cr-r19-ba422fce, cost-route-strong-cr-r20-ba422fce
+  cost-route-strong-cr-r21-ba422fce, cost-route-strong-cr-r22-ba422fce
+  cost-route-strong-cr-r23-ba422fce, cost-route-strong-cr-r24-ba422fce
+  cost-route-strong-cr-r25-ba422fce, cost-route-strong-cr-r26-ba422fce
+  cost-route-strong-cr-r27-ba422fce, cost-route-strong-cr-r28-ba422fce
+  cost-route-strong-cr-r29-ba422fce, cost-route-strong-cr-r30-ba422fce
+  cost-route-strong-cr-r31-ba422fce, cost-route-strong-cr-r32-ba422fce
+  cost-route-strong-cr-t01-ba422fce, cost-route-strong-cr-t02-ba422fce
+  cost-route-strong-cr-t03-ba422fce, cost-route-strong-cr-t04-ba422fce
+  cost-route-strong-cr-t05-ba422fce, cost-route-strong-cr-t06-ba422fce
+  cost-route-strong-cr-t07-ba422fce, cost-route-strong-cr-t08-ba422fce
+  cost-route-strong-cr-t09-ba422fce, cost-route-strong-cr-t10-ba422fce
+  cost-route-strong-cr-t11-ba422fce, cost-route-strong-cr-t12-ba422fce
+  cost-route-strong-cr-t13-ba422fce, cost-route-strong-cr-t14-ba422fce
+  cost-route-strong-cr-t15-ba422fce, cost-route-strong-cr-t16-ba422fce
+  cost-route-strong-cr-c01-ba422fce, cost-route-strong-cr-c02-ba422fce
+  cost-route-strong-cr-c03-ba422fce, cost-route-strong-cr-c04-ba422fce
+  cost-route-strong-cr-c05-ba422fce, cost-route-strong-cr-c06-ba422fce
+  cost-route-strong-cr-c07-ba422fce, cost-route-strong-cr-c08-ba422fce
+[standard] 80 条
+  cost-route-standard-cr-f01-ba422fce, cost-route-standard-cr-f02-ba422fce
+  cost-route-standard-cr-f03-ba422fce, cost-route-standard-cr-f04-ba422fce
+  cost-route-standard-cr-f05-ba422fce, cost-route-standard-cr-f06-ba422fce
+  cost-route-standard-cr-f07-ba422fce, cost-route-standard-cr-f08-ba422fce
+  cost-route-standard-cr-f09-ba422fce, cost-route-standard-cr-f10-ba422fce
+  cost-route-standard-cr-f11-ba422fce, cost-route-standard-cr-f12-ba422fce
+  cost-route-standard-cr-f13-ba422fce, cost-route-standard-cr-f14-ba422fce
+  cost-route-standard-cr-f15-ba422fce, cost-route-standard-cr-f16-ba422fce
+  cost-route-standard-cr-f17-ba422fce, cost-route-standard-cr-f18-ba422fce
+  cost-route-standard-cr-f19-ba422fce, cost-route-standard-cr-f20-ba422fce
+  cost-route-standard-cr-f21-ba422fce, cost-route-standard-cr-f22-ba422fce
+  cost-route-standard-cr-f23-ba422fce, cost-route-standard-cr-f24-ba422fce
+  cost-route-standard-cr-r01-ba422fce, cost-route-standard-cr-r02-ba422fce
+  cost-route-standard-cr-r03-ba422fce, cost-route-standard-cr-r04-ba422fce
+  cost-route-standard-cr-r05-ba422fce, cost-route-standard-cr-r06-ba422fce
+  cost-route-standard-cr-r07-ba422fce, cost-route-standard-cr-r08-ba422fce
+  cost-route-standard-cr-r09-ba422fce, cost-route-standard-cr-r10-ba422fce
+  cost-route-standard-cr-r11-ba422fce, cost-route-standard-cr-r12-ba422fce
+  cost-route-standard-cr-r13-ba422fce, cost-route-standard-cr-r14-ba422fce
+  cost-route-standard-cr-r15-ba422fce, cost-route-standard-cr-r16-ba422fce
+  cost-route-standard-cr-r17-ba422fce, cost-route-standard-cr-r18-ba422fce
+  cost-route-standard-cr-r19-ba422fce, cost-route-standard-cr-r20-ba422fce
+  cost-route-standard-cr-r21-ba422fce, cost-route-standard-cr-r22-ba422fce
+  cost-route-standard-cr-r23-ba422fce, cost-route-standard-cr-r24-ba422fce
+  cost-route-standard-cr-r25-ba422fce, cost-route-standard-cr-r26-ba422fce
+  cost-route-standard-cr-r27-ba422fce, cost-route-standard-cr-r28-ba422fce
+  cost-route-standard-cr-r29-ba422fce, cost-route-standard-cr-r30-ba422fce
+  cost-route-standard-cr-r31-ba422fce, cost-route-standard-cr-r32-ba422fce
+  cost-route-standard-cr-t01-ba422fce, cost-route-standard-cr-t02-ba422fce
+  cost-route-standard-cr-t03-ba422fce, cost-route-standard-cr-t04-ba422fce
+  cost-route-standard-cr-t05-ba422fce, cost-route-standard-cr-t06-ba422fce
+  cost-route-standard-cr-t07-ba422fce, cost-route-standard-cr-t08-ba422fce
+  cost-route-standard-cr-t09-ba422fce, cost-route-standard-cr-t10-ba422fce
+  cost-route-standard-cr-t11-ba422fce, cost-route-standard-cr-t12-ba422fce
+  cost-route-standard-cr-t13-ba422fce, cost-route-standard-cr-t14-ba422fce
+  cost-route-standard-cr-t15-ba422fce, cost-route-standard-cr-t16-ba422fce
+  cost-route-standard-cr-c01-ba422fce, cost-route-standard-cr-c02-ba422fce
+  cost-route-standard-cr-c03-ba422fce, cost-route-standard-cr-c04-ba422fce
+  cost-route-standard-cr-c05-ba422fce, cost-route-standard-cr-c06-ba422fce
+  cost-route-standard-cr-c07-ba422fce, cost-route-standard-cr-c08-ba422fce
+[tiered] 80 条
+  cost-route-tiered-cr-f01-ba422fce, cost-route-tiered-cr-f02-ba422fce
+  cost-route-tiered-cr-f03-ba422fce, cost-route-tiered-cr-f04-ba422fce
+  cost-route-tiered-cr-f05-ba422fce, cost-route-tiered-cr-f06-ba422fce
+  cost-route-tiered-cr-f07-ba422fce, cost-route-tiered-cr-f08-ba422fce
+  cost-route-tiered-cr-f09-ba422fce, cost-route-tiered-cr-f10-ba422fce
+  cost-route-tiered-cr-f11-ba422fce, cost-route-tiered-cr-f12-ba422fce
+  cost-route-tiered-cr-f13-ba422fce, cost-route-tiered-cr-f14-ba422fce
+  cost-route-tiered-cr-f15-ba422fce, cost-route-tiered-cr-f16-ba422fce
+  cost-route-tiered-cr-f17-ba422fce, cost-route-tiered-cr-f18-ba422fce
+  cost-route-tiered-cr-f19-ba422fce, cost-route-tiered-cr-f20-ba422fce
+  cost-route-tiered-cr-f21-ba422fce, cost-route-tiered-cr-f22-ba422fce
+  cost-route-tiered-cr-f23-ba422fce, cost-route-tiered-cr-f24-ba422fce
+  cost-route-tiered-cr-r01-ba422fce, cost-route-tiered-cr-r02-ba422fce
+  cost-route-tiered-cr-r03-ba422fce, cost-route-tiered-cr-r04-ba422fce
+  cost-route-tiered-cr-r05-ba422fce, cost-route-tiered-cr-r06-ba422fce
+  cost-route-tiered-cr-r07-ba422fce, cost-route-tiered-cr-r08-ba422fce
+  cost-route-tiered-cr-r09-ba422fce, cost-route-tiered-cr-r10-ba422fce
+  cost-route-tiered-cr-r11-ba422fce, cost-route-tiered-cr-r12-ba422fce
+  cost-route-tiered-cr-r13-ba422fce, cost-route-tiered-cr-r14-ba422fce
+  cost-route-tiered-cr-r15-ba422fce, cost-route-tiered-cr-r16-ba422fce
+  cost-route-tiered-cr-r17-ba422fce, cost-route-tiered-cr-r18-ba422fce
+  cost-route-tiered-cr-r19-ba422fce, cost-route-tiered-cr-r20-ba422fce
+  cost-route-tiered-cr-r21-ba422fce, cost-route-tiered-cr-r22-ba422fce
+  cost-route-tiered-cr-r23-ba422fce, cost-route-tiered-cr-r24-ba422fce
+  cost-route-tiered-cr-r25-ba422fce, cost-route-tiered-cr-r26-ba422fce
+  cost-route-tiered-cr-r27-ba422fce, cost-route-tiered-cr-r28-ba422fce
+  cost-route-tiered-cr-r29-ba422fce, cost-route-tiered-cr-r30-ba422fce
+  cost-route-tiered-cr-r31-ba422fce, cost-route-tiered-cr-r32-ba422fce
+  cost-route-tiered-cr-t01-ba422fce, cost-route-tiered-cr-t02-ba422fce
+  cost-route-tiered-cr-t03-ba422fce, cost-route-tiered-cr-t04-ba422fce
+  cost-route-tiered-cr-t05-ba422fce, cost-route-tiered-cr-t06-ba422fce
+  cost-route-tiered-cr-t07-ba422fce, cost-route-tiered-cr-t08-ba422fce
+  cost-route-tiered-cr-t09-ba422fce, cost-route-tiered-cr-t10-ba422fce
+  cost-route-tiered-cr-t11-ba422fce, cost-route-tiered-cr-t12-ba422fce
+  cost-route-tiered-cr-t13-ba422fce, cost-route-tiered-cr-t14-ba422fce
+  cost-route-tiered-cr-t15-ba422fce, cost-route-tiered-cr-t16-ba422fce
+  cost-route-tiered-cr-c01-ba422fce, cost-route-tiered-cr-c02-ba422fce
+  cost-route-tiered-cr-c03-ba422fce, cost-route-tiered-cr-c04-ba422fce
+  cost-route-tiered-cr-c05-ba422fce, cost-route-tiered-cr-c06-ba422fce
+  cost-route-tiered-cr-c07-ba422fce, cost-route-tiered-cr-c08-ba422fce

@@ -62,6 +62,10 @@
 
 - 语料锚变更必须双向同步：语料改动跑 `tests/apps/test_seed_script.py`（语义锚 lint）、
   用例改动跑 `tests/evals/test_seed_cases.py`（引用一致性七层 lint）——两侧红了先修判据一致性再提交；
+- **`cost_questions.json` 不是评测用例**（M4.6 成本实验题库，双节 routing 80 / cache 唯一池 140）：
+  与本目录 cases.json **字面零交集是硬约束**（04 M4「没法被质疑是评测集凑出来的」），节内全唯一、
+  节间零交集、工具题引用实验种子订单（`scripts/cost_common.py` I1）——全部由
+  `tests/obs/test_cost_traffic.py` 钉死；给它加题前先跑该 lint；
 - 用例改动后须重跑 `uv run python scripts/seed_eval_cases.py` 让表与定义源同步（定义源改了表不自动变）；
 - 订单号/用户名引用以 `scripts/seed_demo.py` 常量为唯一事实源（I1），测试自动核对；
 - 敏感纪律与 cassette 同款：用例只许虚构演示数据，禁真实 PII/key。
