@@ -1,0 +1,43 @@
+M4.7 应用容器化冒烟凭证（2026-08-04；plans/m4 第八章 §5 五项 + (57) 实测 + scale 验证）
+========================================================================
+形态：单镜像四服务（Dockerfile=uv 官方 py3.13-bookworm-slim 基底、COPY 白名单式、
+镜像内无 .env 无密钥）；compose 新增 migrate(one-shot)/api/worker/beat，应用容器
+一律经 migrate 完成后启动（service_completed_successfully），restart=unless-stopped
+（#31 应用半收口；保住"手动 docker stop 看降级"演示口径）。
+
+1. up -d --build：六服务就位——migrate Exited(0)，api healthy，worker/beat running，
+   pg/redis healthy。PASS
+2. GET http://127.0.0.1:8000/healthz → 200。PASS
+3. 容器内 alembic_version = e5a1c7d94f02（=当前 head，含 M4.7-B 的 REVOKE 迁移
+   ——migrate one-shot 在容器世界完整走通迁移链）。PASS
+4. worker banner：celery 5.6.3，**concurrency 32 (prefork)**（Linux 默认，
+   非 Windows 的 --pool=solo 调试口径），三任务注册
+   （aegis.ingest_document / reaper.reap_expired_leases / hitl.expire_approvals）；
+   beat 已派活且 reaper 任务在容器内实跑成功（scanned=0 recovered=0 abandoned=0）。PASS
+5. 容器内端到端对话（真实调用）：JWT（宿主 mint，同 .env 密钥经 env_file 注入容器验签）
+   → POST /v1/chat → 200，SSE 完整两帧：token（"云杉数码商城的营业时间是每天
+   9:00-18:00，周一至周日均营业。"）+ done(reason=faq_direct)——认证/准入/分诊/
+   FAQ 直答/守卫/事件落盘全链在容器世界走通。PASS
+
+(57) 实测半边（真实网络断连——ASGI 直调世界无此语义，归位 M4.7 容器验）：
+   POST /v1/chat 收到首帧后硬断连（关闭连接），宿主侧轮询事件面——
+   事件序列完整落盘 [user_message, llm_call, llm_result, assistant_message,
+   loop_terminated]。**断连不取消生产者=真实网络实证。PASS**
+   （approvals 端点断连全弧带 HITL 剧本的专项实测并入 M5.4 demo 排练——如实声明。）
+
+scale 验证（M5.3 硬依赖解除确认）：
+   - `docker compose up --scale api=3` 被拒：custom container_name 先于宿主端口
+     映射撞上（compose 原话："Remove the custom name to scale the service"）——
+     §7-6 预言的坑实测坐实，M5.3 上 Nginx 时须同时去掉 api 的 container_name 与
+     宿主端口映射（compose 注释已预埋）；
+   - **镜像级多副本能力已证**：同镜像另起 2 个免映射副本（aegis-api-scale2/3）
+     接同一 PG/Redis，容器内 healthz 双双 200——"任意副本服务任意租户"的物质
+     基础在位，M5.3 只剩接入层。PASS
+
+#48 Linux 复验：见 reports/m4_kill9_ingest_linux.txt（四断言全 PASS——重启后 102s
+   **零人工**自动恢复至 DONE；unacked 自动重投这一环在 asynloop 世界闭合，
+   Windows 实录只兑现一半的"至少一次"自此完整）。
+
+真实调用记账（附A #9 后半按实况裁定并登记）：容器冒烟合计 **2 个真实请求**
+（端到端对话 1 + (57) 断连探针 1），LLM 调用 4 次、合计 <¥0.01——原口径"1 次"
+按实况修订（(57) 实测半边归本步是 M4.2 收口拍板 5 的移位决定，探针必须真调用）。

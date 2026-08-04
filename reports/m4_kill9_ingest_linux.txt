@@ -1,0 +1,13 @@
+# M4.7 #48 Linux 复验（2026-08-04 01:04:18Z）
+文档 kill9-doc-1785805458；visibility_timeout=60s（实验尺度，生产默认 3600s——口径随数字走）
+[0] 停 compose worker/beat（防生产 worker 抢走实验消息；结束后恢复）
+[1] 种子就绪；启动容器 worker（Linux prefork——asynloop 世界）
+[2] 任务已投递，等首批打到假服务后 kill -9
+[3] 崩溃现场：status=processing 块 10/25 已回填（断言①=PROCESSING+部分回填）
+[4] broker：unacked=1 queued=0（断言②=消息不丢仍在 unacked）
+[5] 重启容器 worker，**全程零人工 restore**——等 kombu 定时器自动重投
+[6] 断言③ PASS：重启后 102s 自动恢复至 DONE（25/25 块；未调 restore_visible）
+    收尾 broker：unacked=0 queued=0
+[7] 账本 embedding 行=3，理论批数=3（断言④=重复 ≤1 批）
+四断言全 PASS——Windows 实录缺的那一环（定时器自动 restore）在 Linux 容器世界闭合。
+[8] 清理完成：kill9 容器已删、假服务已停、实验数据已清、compose worker/beat 已恢复

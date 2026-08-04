@@ -347,4 +347,5 @@ async def main() -> None:
     sys.exit(0 if all_pass else 1)
 
 
-asyncio.run(main())
+if __name__ == "__main__":  # M4.7：补守卫——Linux 复验脚本 importlib 复用本件的种子/断言/清理件
+    asyncio.run(main())

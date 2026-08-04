@@ -35,6 +35,98 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---- 应用四服务（M4.7，#26/#31）：同一镜像不同 command；migrate one-shot 先行，
+  # 多副本永不抢迁移；api/worker/beat 一律 unless-stopped（与 pg/redis 同选型同理由：
+  # 保住"手动 docker stop 看降级"的演示口径）。环境变量用服务名不是 localhost（§7-1）；
+  # 密钥经 env_file 注入运行时、绝不进镜像层。 ----
+
+  migrate:
+    build: ..
+    image: aegis-app:latest
+    container_name: aegis-migrate
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aegis:aegis@postgres:5432/aegis
+      DATABASE_URL_APP: postgresql+asyncpg://aegis_app:aegis_app@postgres:5432/aegis
+      REDIS_URL: redis://redis:6379/0
+    env_file: ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: aegis-app:latest
+    container_name: aegis-api
+    restart: unless-stopped
+    # 优雅停机配套只落配置（评审 C35，验证归 M5.3/M5.4）
+    command:
+      [
+        "uvicorn",
+        "aegis.api.main:create_app",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--timeout-graceful-shutdown",
+        "10",
+      ]
+    stop_grace_period: 15s
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aegis:aegis@postgres:5432/aegis
+      DATABASE_URL_APP: postgresql+asyncpg://aegis_app:aegis_app@postgres:5432/aegis
+      REDIS_URL: redis://redis:6379/0
+    env_file: ../.env
+    ports:
+      # 冒烟单副本保留回环映射；M5.3 `--scale api=3` 时删掉本映射（固定宿主端口×多副本
+      # 必撞——届时由 Nginx 统一入口，§7-6 预埋注记）
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # slim 镜像无 curl：python 一行探 /healthz（plans/m4 §3-2）
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    image: aegis-app:latest
+    container_name: aegis-worker
+    restart: unless-stopped
+    # 容器内 Linux 用默认 prefork（--pool=solo 只是 Windows 本地调试口径，06 §4）
+    command: ["celery", "-A", "aegis.workers.celery_app", "worker", "-l", "info"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aegis:aegis@postgres:5432/aegis
+      DATABASE_URL_APP: postgresql+asyncpg://aegis_app:aegis_app@postgres:5432/aegis
+      REDIS_URL: redis://redis:6379/0
+    env_file: ../.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  beat:
+    image: aegis-app:latest
+    container_name: aegis-beat
+    restart: unless-stopped
+    command: ["celery", "-A", "aegis.workers.celery_app", "beat", "-l", "info"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aegis:aegis@postgres:5432/aegis
+      DATABASE_URL_APP: postgresql+asyncpg://aegis_app:aegis_app@postgres:5432/aegis
+      REDIS_URL: redis://redis:6379/0
+    env_file: ../.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
 volumes:
   pg_data:
   redis_data:
