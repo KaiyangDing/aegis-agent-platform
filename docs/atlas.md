@@ -182,7 +182,43 @@ flowchart TD
 
 ---
 
-## 闸门与护栏总表（L1/L2/L3，M3.12 版；治理行 M4.8 补）
+## 图组 E：治理层（M4.8 版）
+
+### E1 治理五件套与数据流（谁读事实源、谁产凭证）
+
+```mermaid
+flowchart LR
+    EV[(events 事实源)] --> TR[trace API M4.1<br/>TraceAssembler+PII masker]
+    EV --> RP[回放门 M4.3<br/>11 盘行为断言 零 token]
+    UL[(usage_ledger)] --> MX[/metrics M4.2<br/>11 族 自有 REGISTRY/]
+    UL --> CO[成本实验 M4.6<br/>精确 sid 分账]
+    EC[(eval_cases 表)] --> EV4[离线评测 M4.4/4.5<br/>机器绊线→judge 终裁]
+    EV4 --> RPT[reports/ 凭证]
+    CO --> RPT
+    RP --> CI[CI 第九道门]
+```
+
+要点：可观测三件全部**从事实源派生**（"能派生的指标绝不重复计数"）；两条评测流水线目的不同
+不可混（回放测行为零 token／评测测质量真实调用）；成本数字可由 ledger 复算（审计性即口径）。
+
+### E2 容器拓扑（M4.7，#26/#31）
+
+```mermaid
+flowchart TB
+    subgraph 同一镜像 aegis-app
+      MG[migrate one-shot<br/>alembic upgrade head] --> API[api uvicorn --factory]
+      MG --> WK[worker celery prefork]
+      MG --> BT[beat]
+    end
+    PG[(postgres)] --> MG
+    RD[(redis)] --> API & WK & BT
+    API -. "127.0.0.1:8000 仅回环" .-> HOST[宿主]
+```
+
+要点：migrate 先行（`service_completed_successfully`）=多副本永不抢迁移；应用容器
+unless-stopped（保"手动停容器看降级"演示口径）；镜像内无 .env；**Linux prefork 世界
+才有 kombu 自动 restore**（#48 两世界凭证：Windows=手动半、Linux=102s 零人工全自动）。
+## 闸门与护栏总表（L1/L2/L3+治理档，M4.8 版）
 
 | 拦截点 | 层 | 防什么 | 失败方向 | 代码锚 | 测试锚 |
 |---|---|---|---|---|---|
@@ -231,7 +267,21 @@ flowchart TD
 
 ---
 
-## 每层文件表（L1/L2/L3；行数为约值，职责一句话，深挖跳 08/retro）
+
+
+**治理档（M4.8 补）**：
+
+| 拦截点 | 层 | 防什么 | 失败方向 | 代码锚 | 测试锚 |
+|---|---|---|---|---|---|
+| 展示层 PII masker 单点 | obs | 事件原文经查询面外泄 | 打码失败=占位顶替（绝不拖垮查询） | obs/masking（复用 PII_RULES_V1） | tests/obs/test_masking |
+| 回放行为门（11 盘四键期望） | CI | prompt/行为漂移静默混入 | 失配响亮红（C10 早于断言） | tests/replay | m4_replay_redgreen.txt |
+| 评测预算闸 eval_run_token_budget | 脚本 | 批次烧穿 | 超限中止落 partial | run_eval:run_batch | test_eval_runner |
+| 成本实验预算闸×2 | 脚本 | 实验烧穿 | 超限中止落 partial | experiment_cost_*（config 两字段） | 冒烟实录 |
+| 计量掉账 sanity（sid 覆盖=驱动数） | 脚本 | fail-open 静默丢账污染数字 | 缺账中止不出报告 | experiment_cost_*:coverage | 两报告 |
+| 跨 loop 单例哨兵 LoopBoundGuard | core | keep-alive 深处裸炸 | mock 严格抛／redis·http 响亮警告 | core/loopcheck | test_loopcheck |
+| notifier 心跳 SELECT 1 | api | 黑洞形态静默失聪 | 探针失败→重连+唤醒在途者 | api/notify:_run | test_notify |
+| alembic_version REVOKE | DB | 低权角色改迁移水位 | 42501 | 迁移 e5a1c7d94f02 | test_rls M4.7 节 |
+## 每层文件表（L1/L2/L3+治理；行数为约值，职责一句话，深挖跳 08/retro）
 
 | 文件 | 约行 | 职责一句话 | 最重要不变量 |
 |---|---|---|---|
@@ -281,6 +331,19 @@ flowchart TD
 
 ---
 
+**治理层文件（M4.8 补）**：
+
+| 文件 | 行数≈ | 职责一句话 | 最重要不变量 |
+|---|---|---|---|
+| obs/masking.py | 60 | 展示层 PII 打码单点（复用 guardrails.PII_RULES_V1） | 绝不抛异常；events 永存原文，脱敏只在展示出口 |
+| obs/trace.py | 150 | TraceAssembler：事件→TraceView（耗时配对+账本聚合） | 账本聚合包 tenant_context（(58) 防线）；鉴权归端点 |
+| obs/metrics.py | 170 | 自有 REGISTRY 11 族+refresh_db_metrics | 刷新走 owner 维护面；族间隔离失败留上次值 |
+| obs/evaluation.py | 77 | 评测双表 ORM（eval_cases=RLS 第十表） | enabled 运营开关不被重跑冲掉 |
+| core/loopcheck.py | 60 | 跨 loop 单例哨兵（㉝ 共性防线） | 首用绑定；同实例跨 loop 才报；替身重绑定豁免 |
+| tests/replay/ | 700 | 回放行为门（manifest+DRIVERS 三族） | 盘面≡manifest≡DRIVERS 三向完整性 |
+| scripts/run_eval.py | 470 | 离线评测 runner（绊线→judge 分层判定） | 绊线只管召回；judge 与被评共用唯一 sid 精确对账 |
+| scripts/experiment_cost_*.py | 660 | 成本对照两实验（双基线/两相位+全命中自检） | 数字可由 ledger 复算；对不上先修再报数 |
+| Dockerfile+deploy/compose | 160 | 单镜像四服务编排 | migrate 先行；镜像无密钥；宿主端口仅回环 |
 ## 失败哲学总表（骨架 ⏳ M5.5 终稿；速记版）
 
 | # | 哲学 | 一句话 | 出处 |
@@ -316,7 +379,14 @@ flowchart TD
 
 ---
 
-## 已知边界汇总（M2/M3 毕业版；详见各 retro §7）
+| 评测稳定基线 38/40=95% | 40 用例三类；两条已知失败=强先验编造样本有名有姓 | eval_baseline_20260803.txt |
+| judge spot-check ±1 一致率 100% | 25 条异族复评（Claude vs qwen3.7-max），口径如实非严格盲评 | m4_judge_spotcheck.txt |
+| 档位路由降本 vs-strong 74.7%/vs-standard 18.9% | 80 条全唯一集、双基线、缓存关、B 组含分诊成本 | m4_cost_routing.txt |
+| 精确缓存降本 21.9% | 30% 复述假设显式声明；请求级全命中自检 60/60 | m4_cost_cache.txt |
+| kill -9 自动恢复 102s（Linux 容器，零人工） | vt=60s 实验尺度+定时器 10s 节拍+重新消费；账本=理论批数零重复计费 | m4_kill9_ingest_linux.txt |
+| M4 真实调用总账 ¥1.2488 | 账本五族聚合可复算（红线口径 00 §8.0） | m4_acceptance.md |
+
+## 已知边界汇总（M2/M3/M4 毕业版；详见各 retro §7 与 00 §10.1-bis）
 
 - 思考型模型首块饥饿盲区：现处置=全池关思考；关不掉思考的模型入池需活性信号（00 #41，M4.0）；
 - `_pump_with_lease` finally 段次生异常可顶掉原始异常（plans/m2.12 偏差 #7，M4.0 候选）；
@@ -336,6 +406,12 @@ flowchart TD
 
 ---
 
+- （M4）msgbuf 定位=写时副本读时事实的中间态（(52) 站 11 裁决）；终局守卫在通道模式止损≈0（D11 显式接受）；
+- （M4）worker 装配无 msgbuf → worker 驱动续跑重连无 message_reset（(64) 声明在场，实时性不对称已登记）；
+- （M4）帧协议无消息边界、done 兼职（(75)）；`poll_interval_s` 一旋钮两职（(70)）；单频道全租户广播（(69)）；
+- （M4）JWT 续约零机制=v1 到期引导（滑动过期是陷阱）；SSE 认证连接级一次性（⑧⑨）；
+- （M4）检索引用溯源 v1 结构不可能（切块非原文子串，⑯）；FAILED 文档已回填块照常进检索（⑫ 数据面半）；
+- （M4）compose scale 受 container_name+宿主端口双拦（M5.3 摘）；approvals 断连全弧专项归 M5.4；
 ## 复习路径（骨架 ⏳ M5.5 终稿）
 
 - **15 分钟速览**：A1 → B1 → C1 → 闸门总表扫一遍 → 数字凭证卡；
