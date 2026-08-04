@@ -129,7 +129,7 @@
 | M2 | L2 Agent 运行时 | 2.5 周 | M1 | ✅ 2026-07-17（548 测试） | `m2-runtime` |
 | M3 | L3 客服业务（RAG/工具/HITL/SSE） | 2 周 | M2 | ✅ 2026-07-28（852 测试） | `m3-support` |
 | M4 | 治理层（可观测/评测/成本实验） | 1.5 周 | M3 | ✅ 2026-08-03（989 测试；M4.6 起 AI 全权执行=00 §2.1 例外） | `m4-governance` |
-| M5 | 交付收口（压测/演示/简历回填） | 1 周 | M4 | ⬜ **下一个** | `v1.0`（预定） |
+| M5 | 交付收口（压测/演示/简历回填） | 1 周 | M4 | ✅ 2026-08-04 | `v1.0` |
 
 - **节奏**：规划基线按 15–20 小时/周估算，剩余 M2–M5 = 7 周 + ≥1 周缓冲。
   实际节奏远快于基线（M0+M1 规划 2.5 周，实际 3 天），**周数只用于管理相对规模，不预设完成日期**。
@@ -420,7 +420,7 @@ M4.3 回放回归零 token。
 
 ---
 
-## 9. M5 · 交付收口（1 周基线，7 步）⬜
+## 9. M5 · 交付收口（1 周基线，7 步）✅（2026-08-04 毕业，tag `v1.0`）
 
 **真实调用口径**（2026-07-10 补，与 §7.0/§8.0 对齐）：仅 M5.2 口径②（小样本真实延迟分布
 50–100 次）与 M5.4 演示/两项凭证补录产生真实调用，预算上限写死进脚本；
@@ -440,10 +440,25 @@ M4.3 回放回归零 token。
 
 ### 9.2 毕业验收汇总
 
-- [ ] demo 脚本实测 ≤15 分钟跑通全部高光时刻；
-- [ ] 压测报告覆盖 ≥3 个并发档位、两组口径分开；
-- [ ] 熔断恢复闭合时间与**档内容灾切换（qwen-plus→qwen-turbo，P6 修正）**两项凭证补录完成（M5.4）；
-- [ ] 简历模板所有 X 占位符回填实测值，凭证文件齐全（§10.2 清零）。
+- [x] demo 脚本实测 ≤15 分钟跑通全部高光时刻（排练 4 遍全绿、逐段计时登记 docs/demo-script.md；机器时间 <1min）；
+- [x] 压测报告覆盖 ≥3 个并发档位、两组口径分开（口径① 10/30/60 三档 619 稳态请求零错误 `m5_loadtest_overhead.txt`；口径② N=100 真实分布 `m5_real_first_token.txt`——800ms 模型偏乐观句两报告互注）；
+- [x] 熔断恢复闭合时间与**档内容灾切换（qwen-plus→qwen-turbo，P6 修正）**两项凭证补录完成（M5.4：三轮 32.5/31.7/32.3s + 20/20 双面切换，均为 (58) 配对修正后的真账版）；
+- [x] 简历模板所有 X 占位符回填实测值，凭证文件齐全（M5.5：§10.2 七行全 ✅ 已回填；05 §1 逐词对照 M5.6 走完——Anthropic 适配器桩（providers/anthropic.py）、Qwen 三档、被砍项零出现均核实）。
+
+### 9.3 实际交付对账（步 → 提交；基线 B=989 → 毕业 1003）
+
+| 步 | 内容 | 提交 |
+|---|---|---|
+| M5.0 ✅ | 开工走查（§0 十五项：14 过 1 过期修正）+六项拍板 P1–P6 全按建议；P6 容灾对象改档内、帧词汇 8 种、D1 采纳、#33 spike 未做（技能栏行不写）——实况全文见 plans/m5 头部 | 文档笔随 M5.1 |
+| M5.1 ✅ | locust SSE client 自写：iter_sse_frames 纯函数（8 帧词汇）+AegisChatUser（gevent×asyncio 隔离，locustfile 不 import aegis）+30s 稳态窗；测试 989→998 | `3862d07` |
+| M5.2① ✅ | LatencyModelProvider 挂 Provider 层（D1；800ms+20tok/s+200tok 钉死）+_LoadtestEmbedder（零 token 红线另一半）+loadtest_upstream 旗标与 prod 禁用验证器；测试 998→1002 | `8735747` |
+| M5.2②③+M5.3 ✅ | 压测两口径实跑+nginx/scale：口径① 三档 619 稳态零错误、平台开销 avg≈0.4s/P99≤1.4s（注入基线 21.6s 减法，两失真声明在报）；口径② N=100 P50 1306ms（偏乐观句互注；计量盲区 ≤¥0.03 声明）；api 摘 container_name/宿主端口、nginx 127.0.0.1:8080 唯一入口（proxy_buffering off/read_timeout 3600s/gzip off） | `ad7ac1d` |
+| M5.4 ✅ | (72)(77) 清账+两补录真账版+15 分钟分镜：demo_m5_highlights.py 驱动器、排练 4 遍全绿、#14 复验、(57) 断连全弧实录；**(58) 家族第三例**（裸网关驱动缺 tenant_context 配对→空账）排练首遍暴露、两实验重跑归账；测试 1002→1003 | `f6fd42b` `51da5ae` `8a5cf71` |
+| M5.5 ✅ | README 终稿（架构图/能力表/数字表/AI 声明）+05 七数字回填与 #34 调序+atlas 终稿（哲学 21 条/数字卡 M5 档/复习路径）+**P4 优雅停机行为验证**（在途流带 done 收尾、退出码全 0，`m5_graceful_shutdown.txt`） | `1f3d3a6` |
+| M5.6 ✅ | 终验收：§9.2 四项对账、简历逐词对照、深挖题 476–482、§10.1 #27/#28/#34 翻 ✅、#33 关闭（未做，如实）、tag `v1.0` 推送、记忆归档完结版 | 毕业收口笔+tag |
+
+**M5 真实调用总账**：ledger 圈定 **¥0.0154**（lt-breaker 0.0001/lt-failover 0.0003/lt-demo 0.0004/demo 会话 0.0146）+ 口径② 计量盲区上界 ≤¥0.03（首块即断流不达流尾，供应商侧照常计费）≈ **总计 ≤¥0.05**。
+**声明**：`usage_ledger` 中 lt-tenant 1602 行 ¥1.2757 为**压测模拟流量的记账痕迹非真实花费**——LatencyModelProvider 合成 UsageChunk 过真实计量管线×演示价目，供应商零调用（红线未破；恰是计量管线在 60 并发下正常工作的证据）。
 
 ---
 
@@ -479,14 +494,14 @@ M4.3 回放回归零 token。
 | 24 | CI 阻断式密钥扫描（gitleaks 类）+ 依赖漏洞扫描（pip-audit 类） | 评审 C32 | M4.0③ | **✅ 两门已进 CI**（2026-08-03，`09d0c7b`）：**gitleaks** `gitleaks/gitleaks-action@ff98106e…`（v2.3.9，SHA 实查 GitHub API 非凭记忆）置于 checkout 之后**第一道**（后续每步都可能把仓库内容打进日志）+ `fetch-depth: 0` 扫全历史（只扫最新提交等于漏掉"密钥曾经进过历史"，而那是唯一不可逆的情形）+ 仓库根 `.gitleaks.toml`（`extend.useDefault` + 两条经核实豁免：本地容器弱口令连接串 / cassette·reports 高熵串；**空 allowlist 也保留文件本体，让"加豁免"必须显式发生在版本历史里**）；**pip-audit** `uv add --dev pip-audit` + CI 在 `uv sync --frozen` 后 `uv run pip-audit`（必须 `uv run`——审计对象是当前 venv，锁文件即事实源），本地实跑 `No known vulnerabilities found`（输出中 `aegis-agent-platform Dependency not found on PyPI` 是**预期**：本地包无从审计，非告警）。两门均**阻断式**无 `continue-on-error`。**✅ 红绿有效性验证已通过**（M4.0④b，2026-08-03）：探针分支开 PR 触发 `pull_request`，**CI 如期红在 gitleaks 步骤**，验完关 PR 删分支（未合并）。**验证过程本身产出四个"门装了但没验过"的发现**：⑴ `on.push.branches:[main]` 使 `tmp/*` 分支的 push **不触发任何 workflow**，必须走 PR；⑵ 首版探针用 `AKIAIOSFODNN7EXAMPLE` **撞 gitleaks 自带 stopword**（含 `example` 一律放行）→ 即使跑了也是绿的，**假阴性伪装成通过**是红绿验证最危险的失败模式，故换用中性变量名+高熵串走 `generic-api-key`；⑶ CI 日志实证 action 对 push 事件跑 `--log-opts=-1` **只扫本次推送的 commit**（见 #24 上方 ci.yml 注释更正）；⑷ 带 AWS 格式的探针被 **GitHub Push Protection 在服务端拦截**——意外发现仓库有比 CI 更早的第 0 道防线（`[KaiyangDing] is an individual user. No license key is required.` 亦由日志确认）。**纪律**：红绿验证的探针**必须先本地实证会被抓**再推，否则"绿"没有任何信息量 |
 | 25 | LLM-as-judge 人工 spot-check 排期与判据（含同族自评偏差一段话） | 评审 C38 | M4.4 | **✅ M4.4②④（2026-08-03）**：判据与流程落 `docs/eval-rubrics.md` §4（同族自评偏差声明=judge 与被评**全链同为 Qwen**+三缓解：五档锚定示例/对抗判定不依赖 judge/spot-check 凭证；±1 分一致、一致率 <80% 触发重校准）；**排期=首轮 spot-check 挂 M4.5 扩集后**（首个完整基线判分全 5 分零区分度——对照样本量不足，扩集加难例后做量更足的一轮，凭证落 `reports/m4_judge_spotcheck.txt`） |
 | 26 | 应用容器化：Dockerfile + api/worker/beat 编排 + alembic 迁移执行顺序。**M4.0④b 追加一项验收义务**：Linux 容器起 worker 后复验"unacked 消息由定时器自动 restore"——这是 #48 在本地形态下结构性不可达的那一环（Windows 无 event loop），容器化是它第一次能被验证的时机；形态=复用 `scripts/experiment_kill9_ingest.py` 但去掉手动 restore 那一步 | 评审 C20（**M5.3 硬依赖**） | M4.7 | **✅ M4.7-E（2026-08-03，`7a0392d`）**：单镜像四服务（uv 官方 py3.13 基底/COPY 白名单/migrate one-shot 先行 `service_completed_successfully`）；冒烟五项全 PASS（migrate Exited(0)/healthz 200/容器内迁移链走通至 `e5a1c7d94f02`/worker **prefork 32** 三任务注册/容器内端到端真实对话）+**(57) 真实断连实证**（断连后五事件完整落盘）；**追加验收义务已兑现**=`experiment_kill9_ingest_linux.py` 四断言全 PASS（重启后 **102s 零人工自动恢复至 DONE**，凭证 `reports/m4_kill9_ingest_linux.txt`）；**M5.3 硬依赖解除**：镜像级多副本实证（免映射副本×2 healthz 200；compose scale 受 container_name+宿主端口双拦=§7-6 预埋，M5.3 上 Nginx 时一并去掉）。凭证 `reports/m4_container_smoke.txt` |
-| 27 | "确定性回放/replay 调试"升为 demo 高光与简历前三 bullet | 评审 C33 | M5.4/M5.5 | ⬜ |
-| 28 | "多供应商/DeepSeek 实测"简历表述逐词校对（06 §5 口径已对齐）。~~2026-07-16 模型池变更：池=qwen3.7 系+glm5.2，"DeepSeek"改"GLM"~~ **2026-07-17 二次变更（M2.11 期间）**：glm5.2 实为幻影（404 `model_not_found`，三档 fallback 断链两日）已移除；充值解锁后池回归 qwen 梯队（fast=flash→turbo / standard=plus→turbo / strong=qwen3.7-max→plus，06 §5 已改）——**05 的"DeepSeek/GLM/异族容灾"叙事全部作废**，容灾表述回归 M1 形态（qwen 档内 fallback，flash→turbo 已有 M1 实测凭证）；M5.4 容灾实录对象随之改为档内降级 | 评审 X3 | M5.5 | ⬜ |
+| 27 | "确定性回放/replay 调试"升为 demo 高光与简历前三 bullet | 评审 C33 | M5.4/M5.5 | **✅ 双面兑现**：M5.4 demo 高光4（trace 还原+回放门 15 绿=正式高光，分镜入册）；M5.5 简历 #34 调序后 replay 在第一 bullet 首行、精简版校验过（05 §1 括注） |
+| 28 | "多供应商/DeepSeek 实测"简历表述逐词校对（06 §5 口径已对齐）。~~2026-07-16 模型池变更：池=qwen3.7 系+glm5.2，"DeepSeek"改"GLM"~~ **2026-07-17 二次变更（M2.11 期间）**：glm5.2 实为幻影（404 `model_not_found`，三档 fallback 断链两日）已移除；充值解锁后池回归 qwen 梯队（fast=flash→turbo / standard=plus→turbo / strong=qwen3.7-max→plus，06 §5 已改）——**05 的"DeepSeek/GLM/异族容灾"叙事全部作废**，容灾表述回归 M1 形态（qwen 档内 fallback，flash→turbo 已有 M1 实测凭证）；M5.4 容灾实录对象随之改为档内降级 | 评审 X3 | M5.5 | **✅ 逐词校对完成（M5.5）**：05 移除 DeepSeek 字样、改「Qwen 三档实测（含档内容灾切换实录 20/20）」；「实测」只跟有凭证名词、Anthropic 保持「适配器桩测试就绪」限定；06 §5 口径句 M5.0 已同步 |
 | 29 | 熔断/精确缓存的 Redis 触点仍是"每调用付故障延迟"模式（同复盘补丁二病灶）。~~计量影子账本~~：**措辞修订**（M4.0① 读码核实）——`metering.py` 纯 PG 路径全文无 Redis 触点（record/month_spend 均只经 SessionFactory），本条对其天然不适用，裁决对象仅熔断+缓存两处 | 复盘补丁二 | M4.0④a | **✅ 已实装**（2026-08-03，`3c57eaf`，用户拍板"做"）：病灶实为**降级只做到"不抛异常"、没做到"不付延迟"**——`_degraded` 此前只用于日志去重不 gate 调用，每请求 3–4 次触点各白付一遍连接失败延迟（connect 1s～read 2s 级），00 §2.2「缓存与计量故障绝不拖垮请求」只兑现一半；M5.2 三档并发压测必然放大成 P50/P99 污染。**范式与 `RateLimiter`（ratelimit.py:86-115）、`FailoverSessionLock`（locks.py:221-250）同构=全项目第三处**（面试可讲一致性）。两处拍板：⑴**探针只在 `allow()` 领**（每请求必过的判定入口且有本地兜底；写触点各自领会让四个窗口互相续期、恢复时机不可预测）；⑵**缓存粘滞放 router 不放 `ExactCache`**（后者全文零异常处理，降级语义本就住在调用侧 router.py 两处 try；塞进 cache 会让"缓存故障怎么办"分裂两处）。**不变量守住**：粘滞化不改降级语义本身（ADR-005：熔断 fail-open+本地计数 / 缓存降级=miss），两测试文件各留一条专测。**最易写错处**=`on_failure` 的本地记账必须先于跳过判断（写反=降级期熔断彻底失灵；正确语义是"降级的是共享状态不是熔断能力"），`test_degraded_write_touchpoints_skip_redis` 专钉。测试 864→**873**（+9，计划预告 6 上浮 3：两条语义不变量 + 写触点顺序钉子） |
 | 30 | CI mypy 门从 `mypy aegis` 扩到 `mypy .`（tests 11 个存量类型错误：cache 混合列表 join、router tier 字面量、config `_env_file` dataclass_transform 缝隙豁免收敛为 make_settings 单点） | 复盘补丁二验收时发现，从 #24 拆出提前做 | 已完成（提交 `229ea5a`，2026-07-08） | ✅ |
 | 31 | 容器 restart 策略缺失：pg/redis 有 healthcheck 无 `restart`，容器崩溃/宿主重启后不自动拉回（认知坑：healthcheck 只标状态不触发重启；restart 只响应"进程退出"不响应 unhealthy——"进程僵死但没退出"的自愈需 autoheal/swarm，属 v2 非目标）。与 crash-only 声明（C35）配套：无 restart 则 crash-only 只剩 crash | 用户 2026-07-08 追问"服务不可用是否自愈" | **基础设施容器（pg/redis）本次补 `restart: unless-stopped`**（选 unless-stopped 而非 always：保住"手动 docker stop 看降级"的演示口径——M1.12/M2.12/M5.4）；**应用容器（api/worker/beat）restart 随 C20 归 M4.7** | ✅ 基础设施已提交（`729ff4c`，2026-07-08）；**✅ 应用容器已收口（M4.7-E，`7a0392d`）**：api/worker/beat 一律 `unless-stopped`（与 pg/redis 同选型同理由——保住"手动 docker stop 看降级"演示口径）、migrate one-shot `restart: "no"`；优雅停机配置已落（`--timeout-graceful-shutdown 10`+`stop_grace_period: 15s`）；**行为验证 ✅ M5.5 顺手验（P4 拍板兑现，2026-08-04，`reports/m5_graceful_shutdown.txt`）**：在途 SSE 流中三副本 SIGTERM→流带 done 帧于 t+5.8s 完整收尾、退出码全 0（对照 kill=137 crash-only 路径）——优雅停机优化断连体验、正确性始终在 write-ahead 事实源（C35 拼图闭合） |
 | 32 | LangGraph 对照文档 `compare-langgraph-m2.md`：照 M1 对照样式（逐卖点命运表 + 契约主权分析），覆盖 create_react_agent / ToolNode / interrupt / PostgresSaver | 2026-07-08 岗位目标确认（AI Agent/应用岗），由可选升**必做** | **M2.12 已落档 ✅**（2026-07-17：1.0 世代钉版、四覆盖面、命运表 14 行、主权章；interrupt"重放节点 vs 重建事实"钦定面试最深一问） | ✅ |
-| 33 | LangGraph 迷你复刻 spike（1–2 天）：复刻 demo 场景子集 + `@tool`/`ToolNode`/`interrupt` 源码阅读笔记——支撑简历"熟悉 LangGraph"逐词诚实（C18 表述纪律同时满足） | 同 #32 | M4 毕业后弹性窗，M5.0 清点核对 | ⬜ |
-| 34 | 05 简历模板出**应用岗版叙事**：运行时（循环/上下文/HITL）与业务层（RAG/评测）bullet 前置，网关 infra 数字降为支撑证据；90 秒叙事线同步调序 | 同 #32 | M5.5 | ⬜ |
+| 33 | LangGraph 迷你复刻 spike（1–2 天）：复刻 demo 场景子集 + `@tool`/`ToolNode`/`interrupt` 源码阅读笔记——支撑简历"熟悉 LangGraph"逐词诚实（C18 表述纪律同时满足） | 同 #32 | M4 毕业后弹性窗，M5.0 清点核对 | **关闭（v1.0 未做，如实）**：弹性窗归用户排期、至毕业未启用；05 技能栏 LangGraph 行**未写**（P3 前提=spike 凭证在，C18 逐词诚实）。用户日后若做 spike（素材：D:egis-langchain-version 支线 278 测试+00 §12 SPIKE 卡），补一行简历即可 |
+| 34 | 05 简历模板出**应用岗版叙事**：运行时（循环/上下文/HITL）与业务层（RAG/评测）bullet 前置，网关 infra 数字降为支撑证据；90 秒叙事线同步调序 | 同 #32 | M5.5 | **✅ M5.5 已调序**：05 §1 顺序=①运行时（事件溯源/replay 置顶）②业务③治理④网关（佐证语气+数字随行）；90 秒叙事第 3 拍默认 replay 展开；精简版校验通过 |
 | 35 | **M2 代码级复盘 `retro-m2.md`**（retro-m0-m1 姊妹篇，2026-07-10 用户点名必做）：全景地图（类↔职责↔测试）、**接口对齐表**、一次 run 的完整旅程（双轨+三条支线）、横切哲学十条、面试连环炮 19 问 | 用户 2026-07-10 | ~~M2 毕业后新会话首件事~~ | **✅ 定稿**（2026-07-17 毕业当日同会话完成——经用户指示提前，上下文最热时落笔；M2.1–2.7 沿用对抗核验版一字未动，M2.8–2.13 以 `98e2549` 为准新写；含挂点接电对账与 08 行号漂移处置注记） |
 | 36 | **模型交接工程**（Fable 5 → Opus/Sonnet）：`CLAUDE.md` 双入口 + `docs\07-handoff-guide.md` + `docs\08-code-map.md` + `docs\plans\`（M2.5–M5.6 步骤级计划，两路对抗校验+交叉审计后落档）；此后维护纪律：每步毕业时回填对应计划文件偏差块 + 更新 08 对应节（plans\README.md §4） | 用户 2026-07-10 交接需求 | 已完成（2026-07-10） | ✅ |
 | 37 | PG LISTEN/NOTIFY 跨副本事件通知**实装**（选型裁决已在 §2.2 C22 行，但 §7.1 M3.10 行文未点名实装动作，防漏做） | 评审 C22 | **M3.10③ 已实装 ✅**（2026-07-26，`d1d2275`）：迁移 `d41be6a90c27` AFTER INSERT 触发器（payload=session_id:seq 纯路由键）+ api/notify.py EventNotifier（独立 asyncpg 原生连接 LISTEN、断连降级 after_seq 轮询自愈、伪唤醒安全=等待方一律重查）；真实链路实证：批准后续跑帧瞬时推达 GET 流（早于批准 HTTP 响应返回） | ✅ |
