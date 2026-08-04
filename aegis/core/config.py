@@ -94,12 +94,23 @@ class Settings(BaseSettings):
     cost_routing_token_budget: int = Field(default=600_000, gt=0)  # 实验①：80 题×3 组合计
     cost_cache_token_budget: int = Field(default=600_000, gt=0)  # 实验②：200 请求×2 相位合计
 
+    # ---- 压测口径①（M5.2 D1）：上游替换为固定延迟模型，平台栈其余全真 ----
+    loadtest_upstream: bool = False  # 开=providers 全体换 LatencyModelProvider（prod 禁开，校验器兜底）
+    loadtest_response_tokens: int = Field(default=200, gt=0)  # P2 拍板：响应长度写死进口径
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
         # 与 parse_routes 同一哲学：配置错误在启动时炸，不在凌晨的流量里炸（审计加固 B）
         if self.app_env == "prod" and self.fault_injection_rate > 0:
             raise ValueError("prod 环境禁止开启故障注入（fault_injection_rate 必须为 0）")
+        return self
+
+    @model_validator(mode="after")
+    def _no_loadtest_upstream_in_prod(self) -> "Settings":
+        # M5.2 D1：压测替身是实验件——带上生产=全部真实流量打进假上游（比故障注入更彻底的事故）
+        if self.app_env == "prod" and self.loadtest_upstream:
+            raise ValueError("prod 环境禁止开启压测上游替身（loadtest_upstream 必须为 False）")
         return self
 
     @model_validator(mode="after")

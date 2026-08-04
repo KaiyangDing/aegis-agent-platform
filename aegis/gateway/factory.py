@@ -16,6 +16,7 @@ from aegis.gateway.embeddings import EmbeddingClient
 from aegis.gateway.metering import MeteringRecorder, PriceTable
 from aegis.gateway.providers.anthropic import AnthropicProvider
 from aegis.gateway.providers.base import Provider
+from aegis.gateway.providers.latency_model import LatencyModelProvider
 from aegis.gateway.providers.openai_compat import OpenAICompatProvider
 from aegis.gateway.ratelimit import RateLimiter
 from aegis.gateway.router import GatewayLimits, LLMGateway, parse_routes
@@ -47,6 +48,10 @@ def build_gateway(
             "anthropic", s.anthropic_base_url, s.anthropic_api_key.get_secret_value(), client=client
         ),
     }
+    if s.loadtest_upstream:
+        # M5.2 D1（压测口径①）：上游整体替换为固定延迟模型，路由/限流/熔断/缓存/计量
+        # 全部保持真实——"平台自身开销"的测量面；prod 禁开由 Settings 校验器兜底
+        providers = {name: LatencyModelProvider(name, response_tokens=s.loadtest_response_tokens) for name in providers}
     return LLMGateway(
         providers=providers,
         routes=parse_routes(s.model_routes, set(providers)),
