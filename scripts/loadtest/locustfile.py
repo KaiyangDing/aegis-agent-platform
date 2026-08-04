@@ -31,8 +31,12 @@ from scripts.loadtest.sse_client import iter_sse_frames
 WARMUP_S = 30.0
 """预热窗（D6）：首 30s 含冷启动/连接池预热/故障检测延迟，reset 后才是稳态计窗。"""
 
-FIRST_TOKEN_BASELINE_MS = 800.0
-"""口径①的注入首 token 延迟（LatencyModelProvider first_token_s=0.8）——平台开销的减数。"""
+INJECTED_PIPELINE_BASELINE_MS = 11_600.0
+"""口径①的注入管线基线（平台开销的减数，M5.2 口径修正——报告照抄推导）：
+每请求走 分诊调用全流（0.8s 首 token + 200 tok × 50ms = 10.8s）→ 主调用首 token（0.8s），
+故用户可见 TTFT 的注入下界 = 10.8s + 0.8s = 11.6s。合成流量的已知失真=分诊回复与
+真实答案同长（真实分诊是 1 词），失真只影响绝对时长不影响减法后的平台开销。
+embedding 检索向量同开关走进程内替身（零网络零计量——"零 token"红线的另一半）。"""
 
 
 @events.test_start.add_listener

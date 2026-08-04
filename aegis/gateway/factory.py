@@ -1,5 +1,6 @@
 """组装在边缘：真实依赖只在这里聚合成完整网关，其余代码一律靠注入。"""
 
+from collections.abc import Sequence
 from decimal import Decimal
 
 import httpx
@@ -75,6 +76,18 @@ def build_gateway(
     )
 
 
+class _LoadtestEmbedder(EmbeddingClient):
+    """压测口径① 的 embedding 替身（M5.2 D1 补全）：零网络零计量的确定性向量。
+
+    没有它，主路径每请求的检索查询向量会打**真实** embedding API——"零 token"
+    红线被静默穿透且真实网络延迟混进"平台开销"。与 LatencyModelProvider 同一
+    开关同一哲学：上游是假的，平台栈（检索 SQL/重排/装填）保持全真。
+    """
+
+    async def embed(self, texts: Sequence[str], *, tenant_id: str) -> list[list[float]]:
+        return [[0.01] * 1024 for _ in texts]
+
+
 def build_embedding_client(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     client: httpx.AsyncClient | None = None,
@@ -88,7 +101,8 @@ def build_embedding_client(
     limiter 暂不接（决策 C：worker 批次串行天然限速；M3.5 查询侧接线时再议）。"""
     s = get_settings()
     sf = session_factory or get_session_factory()
-    return EmbeddingClient(
+    cls = _LoadtestEmbedder if s.loadtest_upstream else EmbeddingClient
+    return cls(
         base_url=s.dashscope_base_url,
         api_key=s.dashscope_api_key.get_secret_value(),
         meter=MeteringRecorder(sf, _price_table(s.model_prices)),

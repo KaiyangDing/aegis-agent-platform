@@ -1,0 +1,16 @@
+# M5.2 口径① 专用 override（与基座文件叠加使用；**只在压测时挂**，生产/演示不带它）：
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.loadtest.yml up -d --build --scale api=3
+# 覆盖内容即报告口径的一部分（D7：放宽值必须声明）：
+#   上游=LatencyModelProvider（800ms+20tok/s+200tok，D1）；缓存关（T4）；
+#   出站/入站限流放宽到 200/400（默认 provider 8/租户 5/入站 2 QPS 测的是限流墙不是容量）。
+services:
+  api:
+    environment:
+      LOADTEST_UPSTREAM: "1"
+      CACHE_TTL_SECONDS: "0"
+      PROVIDER_RATE: "200"
+      PROVIDER_BURST: "400"
+      TENANT_RATE: "200"
+      TENANT_BURST: "400"
+      INBOUND_RATE: "200"
+      INBOUND_BURST: "400"

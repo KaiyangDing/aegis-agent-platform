@@ -57,7 +57,8 @@ services:
 
   api:
     image: aegis-app:latest
-    container_name: aegis-api
+    # M5.3：去 container_name 与宿主端口映射（M4.7 实测的 --scale 两道拦截在此摘除）；
+    # 宿主入口唯一走 nginx 127.0.0.1:8080（T6）
     restart: unless-stopped
     # 优雅停机配套只落配置（评审 C35，验证归 M5.3/M5.4）
     command:
@@ -78,10 +79,7 @@ services:
       DATABASE_URL_APP: postgresql+asyncpg://aegis_app:aegis_app@postgres:5432/aegis
       REDIS_URL: redis://redis:6379/0
     env_file: ../.env
-    ports:
-      # 冒烟单副本保留回环映射；M5.3 `--scale api=3` 时删掉本映射（固定宿主端口×多副本
-      # 必撞——届时由 Nginx 统一入口，§7-6 预埋注记）
-      - "127.0.0.1:8000:8000"
+    # M5.3：宿主端口映射已摘（M4.7 预埋注记兑现）——多副本互不抢端口，宿主入口唯一走 nginx:8080
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -125,6 +123,19 @@ services:
       migrate:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+
+  nginx:
+    # M5.3：宿主唯一入口（api 已无宿主端口映射）；SSE 两坑配置在 nginx.conf（ADR-007）；
+    # --scale api=N 之后须 `docker compose exec nginx nginx -s reload` 让新副本进解析结果（T5）
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80" # 只绑回环（既有安全口径）
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
         condition: service_healthy
 
 volumes:
