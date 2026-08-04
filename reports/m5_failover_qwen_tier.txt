@@ -1,0 +1,18 @@
+== 档内容灾切换实录（standard：qwen-plus→qwen-turbo；2026-08-04 03:54:22Z）==
+对象修正史：deepseek/glm 两版计划对象均随 #28 作废（模型池 v3）——容灾=qwen 档内降级，
+与 M1 fallback 实测凭证连续（M5.0 P6 拍板；05 表述同步）。
+方法：FaultInjector 对 bailian:qwen-plus 100% 注入（error 模式）；standard 档 N=20 真实调用；
+流全量耗尽（计量/熔断簿记在流尾——#10 实验实测教训）。
+
+结果：20/20 次 UsageChunk.model == qwen-turbo（全数切换 ✅）
+ledger 圈定核对（tenant=lt-failover）：[('qwen-turbo', 20)] ——计费路径同样切换成功（空账即断言失败不出报告）
+驱动层教训（(58) 家族第三例）：裸网关驱动必须 tenant_context 配对，否则计量被 RLS
+静默拒收（fail-open 空账）——本报告为配对修正后的重跑版，首跑 ledger 曾为 []。
+熔断状态：open=否（**预期=否**，见下）
+总耗时 38.1s；真实花费 ¥0.0003（护栏 ¥0.1 写死）
+
+C5/D9 预期行为段（demo 预答「为什么熔断没开」）：
+熔断记账是 provider 粒度（bailian 一本账）；每次 qwen-plus 注入失败 +1 后，
+同 provider 的 qwen-turbo 成功即 on_success('bailian') **清零**失败计数——
+账永远到不了阈值 5。这暴露 provider 粒度对「单模型坏死」的钝感：v1 显式接受
+（00 §2.2：误伤再细化为 provider:model，v2 路径），fallback 本身就是这层的防线。
