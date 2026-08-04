@@ -23,6 +23,7 @@ from aegis.runtime.guardrails import REFUSAL_TEMPLATE, SAFE_REPLY, SUSPICION_NOT
 from aegis.runtime.replay import Cassette, CassetteEntry, FakeGateway
 from aegis.runtime.runtime import AgentRuntime
 from aegis.runtime.spec import AgentSpec
+from aegis.runtime.tools import SideEffect, ToolContext, tool
 
 
 def _text_turn(text: str) -> list[LLMChunk]:
@@ -220,3 +221,44 @@ async def test_final_recheck_replaces_whole_reply(db_session_factory, make_sessi
     assert reply.payload["content"] == SAFE_REPLY
     assert reply.payload["guardrail_truncated"] is True
     assert events[-1].payload["reason"] == "completed"
+
+
+# ---- M4.7 增量：观察池 (66)（tools 轮流中命中必留审计） ----
+
+
+async def test_tools_turn_stream_guard_hit_is_audited(db_session_factory, make_session) -> None:
+    """M4.7 (66)：tools 轮的流中守卫命中必留审计——此前 guard.hit 只在 text 分支被
+    _finish_text 检查，前置文本命中后零事件、下一次 _llm_step 换新实例即遗忘。
+    刻意不补 SAFE_REPLY：本轮无对用户回复位（链路继续走工具），命中文本已被守卫
+    扣下/打码未出通道——审计是义务，改写回复不是。
+    （tool/ToolContext 走模块级导入：future-annotations 下 @tool 的 get_type_hints
+    在模块 globals 解析注解，函数内局部导入必 NameError——M3.11 教训⑵ 家族。）"""
+
+    @tool(side_effect=SideEffect.READ)
+    async def m47_audit_echo(ctx: ToolContext) -> dict[str, bool]:
+        """回声演示工具（本测试专用，注册期防呆要求全仓唯一名）。"""
+        return {"ok": True}
+
+    await make_session("gl-66")
+    spec = AgentSpec(system_prompt="你是演示客服，请简洁回答。", tools=(m47_audit_echo,))
+    call = ToolCall(id="tc-66", name="m47_audit_echo", arguments_json="{}")
+    gateway = _CaptureGateway(
+        [
+            [TextDelta(text="您的手机号 13812345678 已经记录。"), *_tool_turn(call)],
+            _text_turn("已为您处理完毕。"),
+        ]
+    )
+    runtime = AgentRuntime(gateway, db_session_factory)
+    sunk: list[str] = []
+
+    async def sink(text: str) -> None:
+        sunk.append(text)
+
+    events = [e async for e in runtime.run(spec, "gl-66", "帮我查一下", text_sink=sink)]
+    types = [e.type for e in events]
+    guard_idx = types.index(EventType.GUARDRAIL_TRIGGERED)
+    assert guard_idx < types.index(EventType.TOOL_RESULT)  # 扣下即留痕：审计先于工具事件
+    assert events[guard_idx].payload.get("stage") == "stream"
+    assert types[-1] is EventType.LOOP_TERMINATED
+    assert events[-1].payload["reason"] == "completed"
+    assert "13812345678" not in "".join(sunk)  # 命中文本被打码/扣下，未出通道

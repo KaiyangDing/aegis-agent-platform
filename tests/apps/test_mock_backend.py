@@ -8,10 +8,12 @@ db_session_factory 是 owner 连接（RLS 面在 tests/test_rls.py，本文件�
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 import httpx
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import NoResultFound
 
 from aegis.apps.support.mock_backend.app import create_mock_api
 from aegis.apps.support.mock_backend.models import MockOrderRecord, MockWriteOpRecord
@@ -86,16 +88,35 @@ async def test_logistics_unknown_order_is_404(mock_http) -> None:
     assert r.status_code == 404
 
 
-# ---- tickets（内存台账）----
+# ---- tickets（M4.7 ㊳：台账去重与 refunds/coupons 同款；收件箱仍内存 D9）----
 
 
 async def test_ticket_create_returns_id(mock_http) -> None:
-    """tickets 台账内存即可（D9：无对抗用例依赖，重启即清是文档声明的取舍）。"""
+    """带键建单：ticket_id 铸造并入台账 payload（收件箱重启即清的取舍不变）。"""
     body = {"tenant_id": "t-mb", "user_id": "u-mb-1", "title": "投诉", "detail": "很生气"}
-    r = await mock_http.post("/tickets", json=body)
+    r = await mock_http.post("/tickets", json=body, headers={"Idempotency-Key": f"tk-{uuid4().hex}"})
     assert r.status_code == 200
     assert r.json()["ticket_id"]
     assert r.json()["status"] == "open"
+    assert r.json()["duplicate"] is False
+
+
+async def test_ticket_missing_idempotency_key_is_400(mock_http) -> None:
+    """M4.7 ㊳：/tickets 此前连 Idempotency-Key 头都不读（"写工具一律带键"兑现率 2/3，
+    ticket_create 送出的键被静默丢弃）——现与 refunds 同款缺键 400。"""
+    body = {"tenant_id": "t-mb", "user_id": "u-mb-1", "title": "投诉", "detail": "x"}
+    assert (await mock_http.post("/tickets", json=body)).status_code == 400
+
+
+async def test_ticket_same_key_replays_same_ticket_id(mock_http) -> None:
+    """M4.7 ㊳ 主证人：同键重放拿到**同一个** ticket_id——崩溃重试不再产孤儿单
+    （handoff 建单成功后崩、恢复重试的剧本自此有去重兜底）。"""
+    key = f"tk-{uuid4().hex}"
+    body = {"tenant_id": "t-mb", "user_id": "u-mb-1", "title": "转人工", "detail": "s"}
+    first = (await mock_http.post("/tickets", json=body, headers={"Idempotency-Key": key})).json()
+    second = (await mock_http.post("/tickets", json=body, headers={"Idempotency-Key": key})).json()
+    assert first["duplicate"] is False and second["duplicate"] is True
+    assert second["ticket_id"] == first["ticket_id"]
 
 
 # ---- 写端点：去重算法（#6 下游端）----
@@ -105,6 +126,19 @@ async def test_refund_missing_idempotency_key_is_400(mock_http) -> None:
     """缺键 400：逼调用方永远带键——没有钥匙的去重是装饰品（§4.7 算法第 1 步）。"""
     r = await mock_http.post("/refunds", json=dict(_REFUND))
     assert r.status_code == 400
+
+
+async def test_replay_read_is_tenant_scoped_loud(mock_http, db_session_factory) -> None:
+    """M4.7 ㉙：回放读带租户过滤——跨租撞键响亮 NoResultFound（**无 RLS 的世界也**成立），
+    绝不静默借用他租台账。此前回放 SELECT 不带租户，是全模块唯一"交叉核验退化成
+    单层"处，安全全靠"键是 uuid4 不可控"+"RLS 在场"两条外部条件。"""
+    await _seed_order(db_session_factory, "mo-api-x29", amount="80.00")
+    key = f"rf-{uuid4().hex}"
+    body = {**_REFUND, "order_id": "mo-api-x29"}
+    first = await mock_http.post("/refunds", json=body, headers={"Idempotency-Key": key})
+    assert first.status_code == 200 and first.json()["duplicate"] is False
+    with pytest.raises(NoResultFound):
+        await mock_http.post("/refunds", json={**body, "tenant_id": "t-other"}, headers={"Idempotency-Key": key})
 
 
 async def test_refund_executes_and_marks_order(mock_http, db_session_factory) -> None:

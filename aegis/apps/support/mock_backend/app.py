@@ -79,13 +79,15 @@ async def _load_order(s: AsyncSession, order_id: str, tenant_id: str) -> MockOrd
     return row
 
 
-_Executor = Callable[[AsyncSession, "WriteOpIn"], Awaitable[dict[str, Any]]]
-
-
-async def _claim_and_execute(
-    factory: SessionFactory, *, key: str, kind: str, body: WriteOpIn, execute: _Executor
+async def _claim_and_execute[BodyT: (WriteOpIn, TicketIn)](
+    factory: SessionFactory,
+    *,
+    key: str,
+    kind: str,
+    body: BodyT,
+    execute: Callable[[AsyncSession, BodyT], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
-    """去重算法本体（§4.7 唯一伪代码点的单事务实现）。
+    """去重算法本体（§4.7 唯一伪代码点的单事务实现；M4.7 ㊳ 泛化到工单形态）。
 
     单事务化的两个红利：崩溃零中间态（claim 与结果快照要么同时可见要么都不在）；
     校验失败 HTTPException 上抛→整事务回滚→钥匙不被失败的操作烧掉。
@@ -100,8 +102,18 @@ async def _claim_and_execute(
                 .on_conflict_do_nothing(index_elements=["idempotency_key"])
             )
             if _rowcount(claimed) == 0:
+                # M4.7 ㉙：回放读带租户过滤——此前是全模块唯一一处"交叉核验退化成单层"
+                # （claim 的 INSERT 带租户、回放的 SELECT 不带），安全全靠"键是 uuid4
+                # 不可控"+"RLS 在场"两条外部条件；键改成业务可控值（订单号+操作类型是
+                # 最自然的设计）就立刻变跨租户读台账。加 WHERE 后：跨租撞键在**无 RLS
+                # 的世界也**响亮 NoResultFound（与 M4.3② RLS 世界证人同一失败形态）。
                 row = (
-                    await s.execute(select(MockWriteOpRecord).where(MockWriteOpRecord.idempotency_key == key))
+                    await s.execute(
+                        select(MockWriteOpRecord).where(
+                            MockWriteOpRecord.idempotency_key == key,
+                            MockWriteOpRecord.tenant_id == body.tenant_id,
+                        )
+                    )
                 ).scalar_one()
                 return {"duplicate": True, **row.payload}
             result = await execute(s, body)
@@ -126,6 +138,14 @@ async def _execute_coupon(s: AsyncSession, body: WriteOpIn) -> dict[str, Any]:
     """补发优惠券：订单存在即发（面额闸门在工具侧 risk_policy——coupon_threshold），不动订单状态。"""
     order = await _load_order(s, body.order_id, body.tenant_id)
     return {"order_id": order.id, "user_id": body.user_id, "amount": str(body.amount), "granted": True}
+
+
+async def _execute_ticket(s: AsyncSession, body: TicketIn) -> dict[str, Any]:
+    """建工单（M4.7 ㊳）：ticket_id 在首次 claim 时铸造并随 payload 入台账——
+    同键重放拿到**同一个** ticket_id（崩溃重试不再产孤儿单）；"写工具一律带键"
+    的兑现率自此 3/3。内存收件箱（app.state.tickets）的 append 归端点在事务
+    提交后做——D9 的易失取舍不变，台账只管"同键恰一次"与 id 稳定性。"""
+    return {"ticket_id": uuid4().hex, "status": "open", "title": body.title, "detail": body.detail}
 
 
 def create_mock_api(settings: Settings | None = None, session_factory: SessionFactory | None = None) -> FastAPI:
@@ -169,10 +189,25 @@ def create_mock_api(settings: Settings | None = None, session_factory: SessionFa
                 return {"order_id": row.id, "status": row.status, "track": _TRACKS[row.status]}
 
     @app.post("/tickets")
-    async def post_ticket(body: TicketIn, request: Request) -> dict[str, str]:
-        ticket_id = uuid4().hex
-        request.app.state.tickets.append({"ticket_id": ticket_id, **body.model_dump(), "status": "open"})
-        return {"ticket_id": ticket_id, "status": "open"}
+    async def post_ticket(
+        body: TicketIn, request: Request, idempotency_key: Annotated[str | None, Header()] = None
+    ) -> dict[str, Any]:
+        # M4.7 ㊳：此前连 Idempotency-Key 请求头都不读（"写工具一律带键"兑现率 2/3，
+        # ticket_create 送出的键被静默丢弃）——现与 refunds/coupons 同款走 _claim_and_execute
+        if not idempotency_key:
+            raise HTTPException(status_code=400, detail="缺少 Idempotency-Key 请求头——写操作必须带幂等键")
+        result = await _claim_and_execute(
+            request.app.state.session_factory,
+            key=idempotency_key,
+            kind="ticket",
+            body=body,
+            execute=_execute_ticket,
+        )
+        if not result["duplicate"]:
+            # 收件箱 append 在事务提交后：提交与 append 之间崩溃=台账有单收件箱没有，
+            # D9 早已声明内存收件箱重启即清——工单事实以台账（与 HANDOFF 事件）为准
+            request.app.state.tickets.append({"ticket_id": result["ticket_id"], **body.model_dump(), "status": "open"})
+        return result
 
     @app.post("/refunds")
     async def post_refund(

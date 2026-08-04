@@ -552,6 +552,14 @@ class AgentRuntime:
                 logger.info("审批单 %s 所属 run 已收尾，跳过认领：session=%s", claim.id, session_id)
                 claim_req_index = None
         if claim is not None and claim_req_index is not None:
+            # M4.7 (60)：acquire 到 _pump_with_lease 起租约伴飞之间原本零续租，a+ 支把
+            # 这段拉长到 precheck+工具执行（≤tool_step_timeout 30s）+两次全量事件扫描——
+            # 对 lease_ttl_s=60 只剩约 2× 边际且上界从未论证。进重活前续租一次把余量
+            # 恢复成完整 TTL；打空=租约已旁落，照 C2 围栏语义自毁不双开（伴飞心跳同款）。
+            if not await self._leases.renew(
+                session_id, owner=self._lease_owner, generation=generation, ttl_s=self._settings.lease_ttl_s
+            ):
+                raise LeaseLost(f"a+ 认领前续租打空：session={session_id} gen={generation}——所有权已旁落")
             claim_args: Mapping[str, Any] = claim.args
             call_row = next(
                 (

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import httpx
@@ -15,7 +16,7 @@ from sqlalchemy import select
 
 from aegis.apps.support.mock_backend import client as client_mod
 from aegis.apps.support.mock_backend.app import create_mock_api
-from aegis.apps.support.prompts import FALLBACK_LOOP_LIMIT
+from aegis.apps.support.prompts import FALLBACK_LOOP_LIMIT, FALLBACK_LOOP_LIMIT_NO_TICKET
 from aegis.apps.support.service import ChatService
 from aegis.core.config import Settings
 from aegis.core.tenancy import TenantDirectory, TenantRecord
@@ -179,3 +180,103 @@ async def test_missing_tenant_synthesizes_empty_config(db_session_factory) -> No
     assert "t-none" in spec.system_prompt
     frames = [f async for f in svc.handle(tenant_id="t-none", user_id="u-svc", session_id="s-nt", message="查订单")]
     assert frames[-1].data["reason"] == "completed"
+
+
+# ---- M4.7 增量：观察池 ㊸㊹（直答锁段）/㊻（兜底 fail-safe）/㊵（装配拦截） ----
+
+
+class _LogGateway(_SeqGateway):
+    """在 _SeqGateway 上加调用日志——与锁探针共用一本账，锁段与 LLM 调用的先后可断言。"""
+
+    def __init__(self, scripts: list[list[str]], log: list[str]) -> None:
+        super().__init__(scripts)
+        self._log = log
+
+    def complete(self, req: LLMRequest) -> AsyncGenerator[LLMChunk]:
+        self._log.append(f"llm{self.calls}")
+        return super().complete(req)
+
+
+def _probe_hold(log: list[str]):
+    @asynccontextmanager
+    async def probe(lock, session_id):
+        log.append("lock-enter")
+        try:
+            yield
+        finally:
+            log.append("lock-exit")
+
+    return probe
+
+
+async def test_faq_direct_judgment_and_stream_run_under_session_lock(db_session_factory, monkeypatch) -> None:
+    """M4.7 ㊸㊹：直答的判据+LLM 流式+写盘整体在会话锁段内——此前锁只包写盘，
+    判据读在锁外、流式全程无锁（并发主 run 可抢锁：用户看完答案却收 error 帧）。"""
+    log: list[str] = []
+    monkeypatch.setattr("aegis.apps.support.service._maybe_hold", _probe_hold(log))
+    real_history = ChatService._has_history
+
+    async def spy_history(self, sid: str) -> bool:
+        log.append("history-check")
+        return await real_history(self, sid)
+
+    monkeypatch.setattr(ChatService, "_has_history", spy_history)
+    real_append = ChatService._append_direct
+
+    async def spy_append(self, sid, text, tail):
+        log.append("write")
+        return await real_append(self, sid, text, tail)
+
+    monkeypatch.setattr(ChatService, "_append_direct", spy_append)
+    await _seed(db_session_factory, config={"faq": "营业时间 9:00-18:00。", "tools": []})
+    gw = _LogGateway([["faq"], ["营业时间是 9:00-18:00。"]], log)
+    frames = await _handle(_service(db_session_factory, gw))
+    assert frames[-1].data["reason"] == "faq_direct"
+    # llm0=classify 在锁外（无状态）；判据、直答流（llm1）、写盘全部在锁段内
+    assert log.index("lock-enter") < log.index("history-check") < log.index("llm1")
+    assert log.index("llm1") < log.index("write") < log.index("lock-exit")
+
+
+async def test_faq_with_history_falls_back_outside_lock(db_session_factory, monkeypatch) -> None:
+    """M4.7 ㊸ 回落纪律：有历史→主循环接手，且回落发生在锁释放**之后**——
+    runtime 自取同一把会话锁，锁内回落=自撞 SessionLockHeld（结构性防死锁断言）。"""
+    log: list[str] = []
+    monkeypatch.setattr("aegis.apps.support.service._maybe_hold", _probe_hold(log))
+    await _seed(db_session_factory, config={"faq": "营业时间 9:00-18:00。", "tools": []})
+    async with db_session_factory() as s:
+        async with s.begin():
+            s.add(MessageRecord(session_id="s-svc", event_id=uuid4().hex, role="user", content="订单退款"))
+    gw = _LogGateway([["faq"], ["主循环答复"]], log)
+    frames = await _handle(_service(db_session_factory, gw), message="一般要多久？")
+    assert frames[-1].data["reason"] == "completed"
+    assert log.index("lock-exit") < log.index("llm1")  # 主循环的 LLM 调用在锁段之后
+
+
+async def test_fallback_ticket_failure_sends_no_promise_text(wired_mock, db_session_factory, monkeypatch) -> None:
+    """M4.7 ㊻：兜底建单失败→零承诺话术（绝不说"已生成工单"）+ 无 handoff 帧 + done 照发
+    ——500 空响应从此不可达；事件流保留 run 自己的终止与打断话术（X4 无损失）。"""
+
+    async def boom(**kwargs):
+        raise RuntimeError("mock 后端不可用")
+
+    monkeypatch.setattr("aegis.apps.support.service.create_handoff", boom)
+    await _seed(db_session_factory, config={"tools": [], "session_token_budget": 1})
+    gw = _SeqGateway([["tool"]])
+    frames = await _handle(_service(db_session_factory, gw), message="帮我处理一下这个很复杂的问题")
+    kinds = [f.kind for f in frames]
+    assert kinds == ["token", "done"]  # 无 handoff 帧
+    assert frames[0].data["text"] == FALLBACK_LOOP_LIMIT_NO_TICKET
+    assert "工单" not in frames[0].data["text"]
+    assert frames[1].data["reason"] == "token_budget_exceeded"
+    assert "handoff" not in await _event_types(db_session_factory, "s-svc")
+
+
+async def test_unknown_tool_config_is_loud_error_before_any_spend(db_session_factory) -> None:
+    """M4.7 ㊵：装配错误在 classify **之前**拦截——error 帧可见、网关零调用
+    （此前是花完分诊的钱再炸成 500 空流，且日志里只有裸 ValueError）。"""
+    await _seed(db_session_factory, config={"tools": ["ghost_tool"]})
+    gw = _SeqGateway([["tool"]])
+    frames = await _handle(_service(db_session_factory, gw))
+    assert [f.kind for f in frames] == ["error"]
+    assert "配置错误" in frames[0].data["message"]
+    assert gw.calls == 0  # 一分钱没花

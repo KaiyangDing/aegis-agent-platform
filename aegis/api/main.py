@@ -5,6 +5,7 @@ uvicorn 启动（仓库根）：uv run uvicorn aegis.api.main:create_app --facto
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,6 +29,8 @@ from aegis.core.tenancy import SessionFactory, TenantDirectory
 from aegis.gateway.factory import build_embedding_client, build_gateway
 from aegis.gateway.ratelimit import RateLimiter
 from aegis.runtime.runtime import AgentRuntime, GatewayLike
+
+logger = logging.getLogger(__name__)
 
 _CHAT_PAGE = Path(__file__).resolve().parents[1] / "web" / "chat.html"
 """演示聊天页（M3.10④，01 §5 单文件无构建链）：Path(__file__) 锚定不依赖 cwd（07 §4 第 7 条）。"""
@@ -54,6 +57,12 @@ def create_app(
     runtime 的测试形态缺省 None、可显式注入）。
     注入 runtime 却不给 gateway/chat_service = 聊天与审批不可用（端点响亮失败）：
     kb/usage 类测试形态合法，聊天/审批/流式测试必须补 gateway。
+    **中间组合的静默降级面（M4.7 ⑤(76) 显式声明，装配期各留一行日志）**：
+    注入 runtime+gateway 而不给 chat_service → ChatService 以 lock=None 组装
+    （直答/直通分支无会话互斥）；注入 runtime 而不给 msg_redis → 无 msgbuf
+    （断线重连收不到 message_reset）。两者是测试形态的合法降级、生产装配链
+    （全缺省）不可达——组合空间十件 2^n，逐组合响亮不现实，声明+日志+组合钉子
+    （test_app_surface M4.7 节）是裁决过的防线形态。
     """
     s = settings or get_settings()
     factory = session_factory or get_session_factory()
@@ -86,6 +95,10 @@ def create_app(
     app.state.msg_redis = msg_redis
     app.state.limiter = limiter or RateLimiter(get_redis(), replicas=s.replica_count)
     if chat_service is None and gw is not None:
+        if lock is None:
+            logger.info("装配组合：外部注入 runtime——ChatService 以 lock=None 组装（直答/直通无会话互斥，测试形态）")
+        if msg_redis is None:
+            logger.info("装配组合：msg_redis 缺席——msgbuf 关闭（断线重连无 message_reset，测试形态）")
         chat_service = ChatService(
             gateway=gw,
             factory=factory,

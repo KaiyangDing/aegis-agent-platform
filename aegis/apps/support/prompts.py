@@ -27,6 +27,11 @@ FALLBACK_LOOP_LIMIT = "这个问题比较复杂，我先为您转接人工客服
 """循环达上限/会话预算耗尽的兜底话术（§4.8 兜底路径②）：service 层在
 loop_terminated.reason ∈ {max_iterations, token_budget_exceeded} 时补发并建 handoff 工单。"""
 
+FALLBACK_LOOP_LIMIT_NO_TICKET = "这个问题比较复杂，暂时无法继续处理。请稍后重试，或直接拨打人工客服热线咨询。"
+"""兜底路径②的**建单失败**话术（M4.7 ㊻）：绝不许说"已生成工单"——兜底路径的依赖
+（mock 后端可用）比主路径更多，建单失败与"生病"高度相关；此前唯一话术自称已建单，
+把"失败也照发安抚"这条修法堵死。本句零承诺：不提工单、给出用户可自救的去向。"""
+
 HANDOFF_REPLY_TEMPLATE = "已为您转接人工客服，工单号 {ticket_id}，会有专员尽快跟进；您也可以继续补充说明。"
 """HANDOFF 直通分支（用户点名转人工）的答复话术（M3.8② service 层消费）。"""
 

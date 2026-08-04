@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from aegis.apps.support.mock_backend.client import mock_client
+from aegis.apps.support.tools._shared import post_write
 from aegis.core.tenancy import SessionFactory
 from aegis.runtime.store import MessageRecord, SessionRecord
 
@@ -38,21 +38,25 @@ async def _session_summary(factory: SessionFactory, session_id: str) -> str:
 
 
 async def create_handoff(
-    *, factory: SessionFactory, session_id: str, tenant_id: str, user_id: str, reason: str
+    *, factory: SessionFactory, session_id: str, tenant_id: str, user_id: str, reason: str, idempotency_key: str
 ) -> dict[str, Any]:
     """经 mock 工单系统建单，返回 {ticket_id, reason, summary}（handoff 事件 payload 的本体）。
 
     坐席拿到的是摘要不是全量事件流——完整轨迹凭 trace_id≡session_id 回查（X5，M4.1）。
+    M4.7 ㊽：改走 `post_write` 单点——此前裸 POST 是"契约绑在谁调用而不是这是一次
+    外部写"的病根（无幂等键、无 #43 发出前/后分界）；键由调用方给（service 两处），
+    /tickets 台账去重保证同键同 ticket_id（崩溃重试不产孤儿单）。
     """
     summary = await _session_summary(factory, session_id)
-    resp = await mock_client().post(
+    resp = await post_write(
         "/tickets",
-        json={
+        json_body={
             "tenant_id": tenant_id,
             "user_id": user_id,
             "title": f"[转人工] 会话 {session_id}（{reason}）",
             "detail": summary,
         },
+        idempotency_key=idempotency_key,
     )
     resp.raise_for_status()
     ticket = resp.json()

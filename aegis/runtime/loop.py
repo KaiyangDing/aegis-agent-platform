@@ -413,6 +413,15 @@ class AgentLoop:
 
             # tools 分支：assistant(tool_calls) 消息先入工作序列（协议要求先声明后回填）
             self._turns.append(Message(role="assistant", content=turn.text, tool_calls=list(turn.tool_calls)))
+            # M4.7 (66)：tools 轮的流中守卫命中此前零审计（_finish_text 只在 text 分支调用，
+            # guard.hit 无人检查、下一次 _llm_step 换新实例即遗忘）——前置文本命中同样必留痕。
+            # 刻意不补 SAFE_REPLY：本轮没有对用户的回复位（链路继续走工具），且命中文本
+            # 已被守卫扣下未出通道——审计是义务，改写回复不是。
+            if self._stream_guard is not None and self._stream_guard.hit is not None:
+                await self._events.append(
+                    EventType.GUARDRAIL_TRIGGERED,
+                    output_audit_payload(self._stream_guard.hit, stage="stream"),
+                )
             reason = await self._run_tools(turn)
             for event in self._events.drain():
                 yield event

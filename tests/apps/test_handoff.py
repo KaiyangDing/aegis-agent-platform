@@ -39,7 +39,12 @@ async def test_create_handoff_prefers_session_summary(wired_mock, db_session_fac
     """摘要优先级第一档：sessions.summary（M2.5 滚动摘要投影）非空则直接用。"""
     await _seed_session(db_session_factory, "s-ho-1", summary="用户咨询订单 A123 退款进度，已确认可退。")
     out = await create_handoff(
-        factory=db_session_factory, session_id="s-ho-1", tenant_id="t-svc", user_id="u-svc", reason="user_requested"
+        factory=db_session_factory,
+        session_id="s-ho-1",
+        tenant_id="t-svc",
+        user_id="u-svc",
+        reason="user_requested",
+        idempotency_key=uuid4().hex,
     )
     assert out["ticket_id"]
     assert out["reason"] == "user_requested"
@@ -52,7 +57,12 @@ async def test_create_handoff_falls_back_to_last_three_messages(wired_mock, db_s
     for i in range(4):
         await _seed_message(db_session_factory, "s-ho-2", "user" if i % 2 == 0 else "assistant", f"消息{i}")
     out = await create_handoff(
-        factory=db_session_factory, session_id="s-ho-2", tenant_id="t-svc", user_id="u-svc", reason="loop_limit"
+        factory=db_session_factory,
+        session_id="s-ho-2",
+        tenant_id="t-svc",
+        user_id="u-svc",
+        reason="loop_limit",
+        idempotency_key=uuid4().hex,
     )
     assert out["summary"] == "assistant: 消息1\nuser: 消息2\nassistant: 消息3"  # 最近 3 条、时序正向
 
@@ -61,6 +71,11 @@ async def test_create_handoff_empty_history_placeholder(wired_mock, db_session_f
     """第三档：全空 → 固定占位话术（工单不许空 detail 地开出去）。"""
     await _seed_session(db_session_factory, "s-ho-3")
     out = await create_handoff(
-        factory=db_session_factory, session_id="s-ho-3", tenant_id="t-svc", user_id="u-svc", reason="user_requested"
+        factory=db_session_factory,
+        session_id="s-ho-3",
+        tenant_id="t-svc",
+        user_id="u-svc",
+        reason="user_requested",
+        idempotency_key=uuid4().hex,
     )
     assert out["summary"] == "（无历史消息）"

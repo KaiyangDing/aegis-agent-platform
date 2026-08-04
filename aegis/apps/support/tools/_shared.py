@@ -28,6 +28,10 @@ async def fetch_owned_order(ctx: ToolContext, order_id: str) -> dict[str, Any] |
     resp = await mock_client().get(f"/orders/{order_id}", params={"tenant_id": ctx.tenant_id})
     if resp.status_code == 404:
         return None
+    # M4.7 ㊱(55) 复核声明：raise_for_status 把协议错（4xx，重试永远失败）与可重试故障
+    # （503）合流成同一种 ERROR——**当前不可达**：mock 读端点只产 200/404/503（404 已
+    # 在上面消化）。前提是 mock 形态；换真实下游（v2/真实化）时读侧必须补 #43 同款
+    # 的错误分层，且"直读 mock_orders"的三条理由（(55)）届时全部反转，一并复核。
     resp.raise_for_status()  # 503 等非预期状态：裸抛 → executor ERROR（读语义可安全改道）
     order: dict[str, Any] = resp.json()
     if order["tenant_id"] != ctx.tenant_id or order["user_id"] != ctx.user_id:

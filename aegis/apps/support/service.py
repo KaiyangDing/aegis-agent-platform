@@ -27,7 +27,7 @@ from sqlalchemy import func, select
 from aegis.apps.support.agent import build_agent_spec
 from aegis.apps.support.handoff import create_handoff
 from aegis.apps.support.intent import Intent, answer_faq, classify
-from aegis.apps.support.prompts import FALLBACK_LOOP_LIMIT, HANDOFF_REPLY_TEMPLATE
+from aegis.apps.support.prompts import FALLBACK_LOOP_LIMIT, FALLBACK_LOOP_LIMIT_NO_TICKET, HANDOFF_REPLY_TEMPLATE
 from aegis.core.locks import SessionLock, hold_session_lock
 from aegis.core.tenancy import SessionFactory, TenantDirectory, TenantRecord
 from aegis.runtime.events import EventType
@@ -174,22 +174,53 @@ class ChatService:
     ) -> None:
         try:
             tenant = await self.resolve_tenant(tenant_id)
+            # M4.7 ㊵：装配前置到 classify 之前——未知工具名等配置错误此前是"花完分诊的
+            # 钱再炸成 500 空流"（每请求装配期 ValueError 无人接）；现在花钱之前拦截、
+            # 响亮留痕（配置 bug 不是用户错），用户得到可见的 error 帧而非空响应
+            try:
+                spec = build_agent_spec(tenant)
+            except ValueError:
+                logger.exception("租户 %s 配置装配失败（配置 bug，fail-loud）：session=%s", tenant_id, session_id)
+                await queue.put(ChatFrame("error", {"message": "租户配置错误，请联系管理员处理。"}))
+                return
             intent = await classify(self._gateway, message, tenant_id=tenant_id, session_id=session_id)
             faq_digest = str(tenant.config.get("faq") or "")
-            if intent is Intent.FAQ and faq_digest and not await self._has_history(session_id):
-                # M4.4③ ㊴：直答绕过主 Agent，入口规则库原本全程不在场——这里补上
-                # （未注入分类器=纯规则库零 LLM）；HIGH 回落主循环，loop 侧完整处置
-                # （拒答话术+guardrail_triggered 审计+D10 completed 终止）
-                if (await Guardrails().check_input(message)).refuse:
-                    await self._run_main(queue, tenant, user_id, session_id, message)
-                else:
-                    await self._faq_direct(queue, tenant, user_id, session_id, message, faq_digest)
+            if intent is Intent.FAQ and faq_digest:
+                if await self._try_faq_direct(queue, spec, tenant, session_id, message, faq_digest):
+                    return
+                await self._run_main(queue, tenant, user_id, session_id, message, spec)
             elif intent is Intent.HANDOFF:
                 await self._handoff_direct(queue, tenant, user_id, session_id, message)
             else:
-                await self._run_main(queue, tenant, user_id, session_id, message)
+                await self._run_main(queue, tenant, user_id, session_id, message, spec)
         finally:
             await queue.put(None)  # 哨兵恒发：异常路径消费者才能退出等待、经 await 收到异常
+
+    async def _try_faq_direct(
+        self,
+        queue: asyncio.Queue[ChatFrame | None],
+        spec: AgentSpec,
+        tenant: TenantRecord,
+        session_id: str,
+        message: str,
+        faq_digest: str,
+    ) -> bool:
+        """FAQ 直答的判据与执行整体在会话锁内（M4.7 ㊸㊹）。返回 False=让主循环接手。
+
+        ㊹ `_has_history` 判完到用完之间原有并发窗；㊸ 直答 LLM 流式全程原本无锁——
+        并发的主 run 可在流中抢锁，用户看完答案却收 error 帧且答案不入事件流。
+        现在判据+流式+写盘同锁段。**回落必须发生在锁释放之后**：runtime 会自取
+        同一把会话锁，锁内回落=自撞 SessionLockHeld（M3.2 偏差⑼ 端点不自取锁同族）。
+        """
+        async with _maybe_hold(self._lock, session_id):
+            if await self._has_history(session_id):
+                return False
+            # M4.4③ ㊴：直答绕过主 Agent，入口规则库原本全程不在场——这里补上
+            # （未注入分类器=纯规则库零 LLM）；HIGH 回落主循环，loop 侧完整处置
+            # （拒答话术+guardrail_triggered 审计+D10 completed 终止）
+            if (await Guardrails().check_input(message)).refuse:
+                return False
+            return await self._faq_direct(queue, spec, tenant, session_id, message, faq_digest)
 
     async def _has_history(self, session_id: str) -> bool:
         """守卫判据：messages 投影有行即有历史（FAQ 直答轮也写投影 D7——第二轮起必真）。"""
@@ -204,13 +235,17 @@ class ChatService:
     async def _faq_direct(
         self,
         queue: asyncio.Queue[ChatFrame | None],
+        spec: AgentSpec,
         tenant: TenantRecord,
-        user_id: str,
         session_id: str,
         message: str,
         faq_digest: str,
-    ) -> None:
-        spec = build_agent_spec(tenant)
+    ) -> bool:
+        """直答执行体（调用方 `_try_faq_direct` 已持会话锁——本方法不再自取，M4.7 ㊸）。
+
+        返回 True=已完成（含写盘与 done 帧）；False=流失败，调用方在**锁外**回落主循环
+        （旧形态在本方法内直接调 _run_main——锁化后那会自撞，回落职责上移）。
+        """
         # 拍板Ⅳ：直答是"通道上的出口"，02 §2⑨ 守卫在通道生效——参数与主 Agent 同源
         guard = Guardrails().output_guard(
             system_prompt=spec.system_prompt,
@@ -236,8 +271,7 @@ class ChatService:
             # 已推段作废是通道现实（流式代价），缓冲清掉防 GET 侧残影
             logger.warning("FAQ 直答失败，回落主 Agent：session=%s", session_id, exc_info=True)
             await emitter.clear()
-            await self._run_main(queue, tenant, user_id, session_id, message)
-            return
+            return False
         hit = guard.hit
         final_hits = [] if hit is not None else guard.final_check(visible)
         tail_events: list[tuple[EventType, dict[str, Any]]]
@@ -253,9 +287,10 @@ class ChatService:
             ]
         else:
             tail_events = [(EventType.ASSISTANT_MESSAGE, {"content": visible})]
-        await self._write_direct(session_id, message, tail_events)
+        await self._append_direct(session_id, message, tail_events)  # 锁已由调用方持有
         await emitter.clear()
         await queue.put(ChatFrame("done", {"reason": "faq_direct", "trace_id": session_id, "usage": None}))
+        return True
 
     async def _handoff_direct(
         self,
@@ -265,8 +300,15 @@ class ChatService:
         session_id: str,
         message: str,
     ) -> None:
+        # M4.7 ㊽：带键走 post_write 单点（#43 分界从此覆盖 handoff 写）。键用 uuid4：
+        # 直通路径无重试机制（失败=用户重发=合法新单），稳定键在此无消费方
         result = await create_handoff(
-            factory=self._factory, session_id=session_id, tenant_id=tenant.id, user_id=user_id, reason="user_requested"
+            factory=self._factory,
+            session_id=session_id,
+            tenant_id=tenant.id,
+            user_id=user_id,
+            reason="user_requested",
+            idempotency_key=uuid4().hex,
         )
         reply = HANDOFF_REPLY_TEMPLATE.format(ticket_id=result["ticket_id"])
         await self._write_direct(
@@ -278,15 +320,22 @@ class ChatService:
         await queue.put(ChatFrame("handoff", dict(result)))
         await queue.put(ChatFrame("done", {"reason": "handoff", "trace_id": session_id, "usage": None}))
 
+    async def _append_direct(
+        self, session_id: str, user_text: str, tail: list[tuple[EventType, dict[str, Any]]]
+    ) -> None:
+        """直答/直通事件落盘核心（D7）：user_message 起头+尾随事件。**不自取锁**——
+        锁语义归调用方（_write_direct 包锁；_faq_direct 由 _try_faq_direct 的锁段覆盖）。"""
+        writer = await EventWriter.open(self._factory, session_id, run_id=uuid4().hex)
+        await writer.append(EventType.USER_MESSAGE, {"content": user_text})
+        for etype, payload in tail:
+            await writer.append(etype, payload)
+
     async def _write_direct(
         self, session_id: str, user_text: str, tail: list[tuple[EventType, dict[str, Any]]]
     ) -> None:
-        """直答/直通分支的事件落盘（D7）：user_message 起头+尾随事件，单写者在锁内。"""
+        """带锁形态（HANDOFF 直通消费；直答已整段持锁改用 _append_direct——M4.7 ㊸）。"""
         async with _maybe_hold(self._lock, session_id):
-            writer = await EventWriter.open(self._factory, session_id, run_id=uuid4().hex)
-            await writer.append(EventType.USER_MESSAGE, {"content": user_text})
-            for etype, payload in tail:
-                await writer.append(etype, payload)
+            await self._append_direct(session_id, user_text, tail)
 
     async def _run_main(
         self,
@@ -295,6 +344,7 @@ class ChatService:
         user_id: str,
         session_id: str,
         message: str,
+        spec: AgentSpec,
     ) -> None:
         """主分支：RAG/TOOL/AGENT 同入完整 Agent；逐 token 经 L2 text_sink 缝实时出流。
 
@@ -303,8 +353,8 @@ class ChatService:
         （FALLBACK_REASONS 被替换丢弃——M3.8"替换非叠加"定案的流式形态）；
         usage 从 llm_result(ok) 实测累计（拍板Ⅴ）。挂起=无终止事件：清缓冲、
         不发 done（approval_pending 已出帧，客户端据此换 GET 通道——ADR-007）。
+        spec 由 _produce 预装配递入（M4.7 ㊵：配置错误在花钱之前拦截）。
         """
-        spec = build_agent_spec(tenant)
         emitter = _TokenEmitter(queue, self._redis, session_id)
         pending: str | None = None
         term: Mapping[str, Any] | None = None
@@ -347,14 +397,28 @@ class ChatService:
         reason = str(term["reason"])
         if reason in _FALLBACK_REASONS:
             # 兜底路径②：FALLBACK 话术**替换**打断话术出帧（pending 丢弃；原话在事件流 X4 不丢）
-            result = await create_handoff(
-                factory=self._factory, session_id=session_id, tenant_id=tenant.id, user_id=user_id, reason=reason
-            )
-            async with _maybe_hold(self._lock, session_id):
-                writer = await EventWriter.open(self._factory, session_id, run_id=uuid4().hex)
-                await writer.append(EventType.HANDOFF, dict(result))
-            await queue.put(ChatFrame("token", {"text": FALLBACK_LOOP_LIMIT}))
-            await queue.put(ChatFrame("handoff", dict(result)))
+            try:
+                result = await create_handoff(
+                    factory=self._factory,
+                    session_id=session_id,
+                    tenant_id=tenant.id,
+                    user_id=user_id,
+                    reason=reason,
+                    idempotency_key=uuid4().hex,
+                )
+            except Exception:
+                # M4.7 ㊻：兜底路径的依赖（mock 后端可用）比主路径**更多**，且失败与
+                # "生病"高度相关——建单失败绝不再说"已生成工单"（旧话术把"失败也照发
+                # 安抚"这条修法堵死）。改发零承诺话术；事件流已有本 run 的终止与打断
+                # 话术（X4 无损失），不补写事件。500 空响应从此不可达。
+                logger.exception("兜底建单失败：session=%s reason=%s", session_id, reason)
+                await queue.put(ChatFrame("token", {"text": FALLBACK_LOOP_LIMIT_NO_TICKET}))
+            else:
+                async with _maybe_hold(self._lock, session_id):
+                    writer = await EventWriter.open(self._factory, session_id, run_id=uuid4().hex)
+                    await writer.append(EventType.HANDOFF, dict(result))
+                await queue.put(ChatFrame("token", {"text": FALLBACK_LOOP_LIMIT}))
+                await queue.put(ChatFrame("handoff", dict(result)))
         elif pending is not None:
             await queue.put(ChatFrame("token", {"text": pending}))
         await emitter.clear()
