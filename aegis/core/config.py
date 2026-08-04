@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     # ---- 离线评测（M4.4；runner 专用脚本，judge 永不进在线链路——ADR-002 决策 4）----
     eval_run_token_budget: int = Field(default=150_000, gt=0)  # 单批次 token 硬上限（被评+judge 合计，超限中止批次）
 
+    # ---- 成本对照实验（M4.6；两实验各自的 token 硬上限——00 §8.0 预算写死在配置，超限中止落 partial）----
+    cost_routing_token_budget: int = Field(default=600_000, gt=0)  # 实验①：80 题×3 组合计
+    cost_cache_token_budget: int = Field(default=600_000, gt=0)  # 实验②：200 请求×2 相位合计
+
     @model_validator(mode="after")
     def _no_fault_injection_in_prod(self) -> "Settings":
         # 实验开关误带上生产 = 对真实流量随机注 5xx，且故障与真实上游故障不可区分。
