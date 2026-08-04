@@ -8,6 +8,7 @@ from typing import Protocol
 
 import httpx
 
+from aegis.core.loopcheck import LoopBoundGuard
 from aegis.gateway.errors import (
     AuthError,
     BadRequestError,
@@ -29,6 +30,11 @@ class Provider(Protocol):
 
 
 _client: httpx.AsyncClient | None = None
+_guard = LoopBoundGuard(
+    "shared_client() 的 HTTP 客户端",
+    hint="worker/脚本的新 loop 世界请用 new_http_client() 现建现用（M3.9④ 受控缝）。",
+    strict=False,  # ㉝：同 core/redis 档位（偏差登记）
+)
 
 
 def new_http_client() -> httpx.AsyncClient:
@@ -51,6 +57,7 @@ def shared_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
         _client = new_http_client()
+    _guard.check(_client)  # M4.7 ㉝：跨 loop 复用给人话预警（worker 侧应走 new_http_client）
     return _client
 
 

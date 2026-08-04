@@ -11,8 +11,14 @@ from __future__ import annotations
 import httpx
 
 from aegis.apps.support.mock_backend.app import create_mock_api
+from aegis.core.loopcheck import LoopBoundGuard
 
 _client: httpx.AsyncClient | None = None
+_guard = LoopBoundGuard(
+    "mock_client() 的进程内通路",
+    hint="worker 任务体用 set_mock_client 安装任务局部实例（M3.9④）；测试每测自建。",
+    strict=True,  # ㉝：本件契约本就禁止跨 loop 复用——直接抛人话；替身安装即重绑定天然豁免
+)
 
 
 def mock_client() -> httpx.AsyncClient:
@@ -23,6 +29,7 @@ def mock_client() -> httpx.AsyncClient:
             transport=httpx.ASGITransport(app=create_mock_api()),
             base_url="http://mock-backend",
         )
+    _guard.check(_client)  # M4.7 ㉝：跨 loop 复用=人话异常，不等 keep-alive 深处裸炸
     return _client
 
 

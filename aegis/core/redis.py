@@ -5,8 +5,14 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 
 from aegis.core.config import get_settings
+from aegis.core.loopcheck import LoopBoundGuard
 
 _client: aioredis.Redis | None = None
+_guard = LoopBoundGuard(
+    "get_redis() 的 Redis 客户端",
+    hint="worker/脚本的新 loop 世界请用 new_redis_client() 现建现用（M3.9④ 受控缝）。",
+    strict=False,  # ㉝：既有装置面广，先响亮警告观察一个里程碑（偏差登记）
+)
 
 
 def new_redis_client() -> aioredis.Redis:
@@ -32,4 +38,5 @@ def get_redis() -> aioredis.Redis:
     global _client
     if _client is None:
         _client = new_redis_client()
+    _guard.check(_client)  # M4.7 ㉝：跨 loop 复用给人话预警，不等深处裸炸
     return _client

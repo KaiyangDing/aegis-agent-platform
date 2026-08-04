@@ -149,7 +149,14 @@ async def _task_runtime() -> AsyncIterator[AgentRuntime]:
     与 create_app 生产缺省链逐件对应（gateway/lock/retrieval/precheck），差异只在
     资源来源：进程单例 → 任务局部实例。app 引擎连 database_url_app+guard（RLS
     冒充租户的物质基础，值由外层 tenant_context 提供）；mock 通路经 set_mock_client
-    安装（工具面只认 mock_client() 单点——--pool=solo 串行是前提）。
+    安装（工具面只认 mock_client() 单点——--pool=solo 串行是前提；容器 prefork
+    每子进程独立同样成立）。
+
+    **对应关系是人肉承诺+本声明，机制上区分不了"有意不加"与"忘了加"（M4.7 (64)
+    显式登记）**——已知的两条有意差异：⑴ 无 msg_redis/_TokenEmitter → worker 驱动
+    的续跑不写 msgbuf，用户断线重连期间收不到 message_reset（GET 侧看到整段一次性
+    出现，与 API 驱动逐 token 推送实时性不对称）；⑵ 无 text_sink（它本就是每请求物
+    而非装配参数——站 11 更正）。create_app 侧改装配件时，此清单必须同步核对。
     """
     settings = get_settings()
     app_engine = create_async_engine(settings.database_url_app, poolclass=NullPool)
