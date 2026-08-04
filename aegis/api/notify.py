@@ -31,9 +31,20 @@ class EventNotifier:
     不跑 lifespan——测试形态天然走 C22 兜底路径，零真实 LISTEN 依赖）。
     """
 
-    def __init__(self, sqlalchemy_url: str, *, poll_interval_s: float = 2.0) -> None:
+    def __init__(
+        self,
+        sqlalchemy_url: str,
+        *,
+        poll_interval_s: float = 2.0,
+        heartbeat_interval_s: float = 5.0,
+        heartbeat_timeout_s: float = 2.0,
+    ) -> None:
+        # 心跳独立于 poll_interval_s：那个旋钮已身兼降级节拍与重连退避两职（(70) 已知
+        # 边界），不再给它加第三职——探测节拍面向"多快发现黑洞"，与前两者方向无关
         self._dsn = _raw_dsn(sqlalchemy_url)
         self._poll_interval_s = poll_interval_s
+        self._heartbeat_interval_s = heartbeat_interval_s
+        self._heartbeat_timeout_s = heartbeat_timeout_s
         self._conn: asyncpg.Connection | None = None
         self._task: asyncio.Task[None] | None = None
         self._stopped = False
@@ -75,8 +86,22 @@ class EventNotifier:
         for event in list(self._waiters.get(session_id, ())):
             event.set()
 
+    def _wake_all(self) -> None:
+        """降级/停机瞬间唤醒全部在途等待者（(67)）：不唤醒则他们抱着已死的 Event 熬满
+        各自 timeout（最长首块 25s 量级），降级开关只对新来的人生效。被唤醒者按重查
+        原则走一遍增量查询，随后再进 wait_for 时 _conn 已是 None=轮询节拍——伪唤醒
+        安全由"通知不带数据、一律重查"兜底，本方法不需要任何精确性。"""
+        for bucket in list(self._waiters.values()):
+            for event in list(bucket):
+                event.set()
+
     async def _run(self) -> None:
-        """建连-守连-重连循环：断连即降级（_conn=None → wait_for 走轮询），自愈不惊扰。"""
+        """建连-守连-重连循环：断连即降级（_conn=None → wait_for 走轮询），自愈不惊扰。
+
+        守连不再干等 is_closed()（(68)）：黑洞形态（对端消失无 FIN）下它永远 False，
+        失效模式反而比设计好的降级模式更慢更哑——SELECT 1 心跳把发现时延压到
+        heartbeat_interval_s+heartbeat_timeout_s 的量级，失败走同一条重连/降级路。
+        """
         while not self._stopped:
             conn: asyncpg.Connection | None = None
             try:
@@ -85,13 +110,19 @@ class EventNotifier:
                 self._conn = conn
                 logger.info("LISTEN %s 就绪", _CHANNEL)
                 while not self._stopped and not conn.is_closed():
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(self._heartbeat_interval_s)
+                    if self._stopped or conn.is_closed():
+                        break
+                    # 心跳探针：LISTEN 连接可以正常跑查询；超时/异常=连接已不可信，
+                    # 抛给 except 走既有重连路（探测失败与显式断连同路同语义）
+                    await asyncio.wait_for(conn.execute("SELECT 1"), timeout=self._heartbeat_timeout_s)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.warning("LISTEN 连接失败/中断，%.1fs 后重连（期间降级轮询）", self._poll_interval_s)
             finally:
                 self._conn = None
+                self._wake_all()  # (67)：降级对在途者同样生效（stop 取消路径的 finally 也走这里）
                 if conn is not None:
                     with contextlib.suppress(Exception):
                         await conn.close()
