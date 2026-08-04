@@ -107,7 +107,7 @@ sequenceDiagram
 | `tool_invocations` | id, event_id, tool, args, result_digest, status, latency_ms | 工具审计（投影） |
 | `approvals` | id, session_id, tenant_id, tool_name + args(参数快照), status(pending/approved/rejected/**cancelled/expired**), **expires_at**, operator_id, decided_at, event_id(执行后回填) | HITL 审批单，超时与撤回是一等状态；**不挂 tool_invocation 外键**——03 §4 中审批先于 write-ahead，审批的是参数快照（2026-07-08 M2.2 同步） |
 | `usage_ledger` | tenant_id, session_id, request_id, model, prompt_tokens, completion_tokens, cost | **明细到请求**；聚合维度统一为租户/会话/模型/天 |
-| `eval_cases` / `eval_runs` | case 定义与每次回归结果 | 评测集与趋势 |
+| `eval_cases` / `eval_runs` | case 定义与每次回归结果 | 评测集与趋势（列清单以 M4.4 实装为准：`aegis/obs/evaluation.py` + 迁移 `b371c327f9ff`——eval_cases 十列含 user_id、RLS 第十表；eval_runs 含 judge_model=C36 当次实际模型名回显；设计过程见 docs/plans/m4-detailed.md M4.4 章——附A #6 回填） |
 
 **事件与投影的关系（事件溯源流派的必考题）**：`messages`、`tool_invocations`、`sessions.summary`
 是事件流的**投影**，在写入事件的同一个 PG 事务内同步派生——单库架构让"事件+投影同事务"零成本获得
@@ -199,8 +199,12 @@ SIGTERM 下 in-flight SSE 直接断开，客户端经重订阅通道续收；运
 
 ### 7.1 认证与授权
 
-- **凭证形态**：终端用户 = 租户侧签发的短期 JWT（sub=user_id, tid=tenant_id）；
-  坐席/管理员 = 平台账号登录 + RBAC；
+- **凭证形态**：终端用户 = **平台**签发的短期 JWT（sub=user_id, tid=tenant_id；v1 形态
+  =scripts/mint_token.py，P7 无登录端点）；坐席/管理员 = 平台账号登录 + RBAC。
+  **M4.7 观察池 ④ 叙事修正**：原文"租户侧签发"与 HS256 在架构上不相容——对称密钥
+  真交给租户等于验签密钥外泄、隔离归零（任何租户可伪造他租 token）。"租户侧自主
+  签发"属 v2，且届时**必须换非对称**（每租户 RS256/EdDSA 公钥注册，平台只存公钥）；
+  v1 实况就是平台统一签发（HS256+双密钥窗，M3.1 实装）；
 - **端点 × 角色矩阵**：
 
 | 端点 | user | operator | admin |
