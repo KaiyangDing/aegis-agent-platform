@@ -54,7 +54,7 @@ jobs:
       # 阻断性实证：action 跑的是 `--exit-code=2`，有 leak 即非零退出 → 步骤失败 → workflow 红。
       # 豁免面在仓库根 .gitleaks.toml（日志确认被读到并 extend 默认规则集），每条豁免须写明理由。
       - name: 密钥扫描（gitleaks，增量：本次推送的 commit）
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
